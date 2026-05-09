@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>系统登录</title>
+    <link rel="stylesheet" href="/static/css/login.css">
+</head>
+<body>
+    <div class="login-container">
+        <h1 class="login-title">系统登录</h1>
+        
+        {% if error %}<div class="error-message">{{ error }}</div>{% endif %}
+        
+        <form action="/login" method="POST">
+            <div class="form-group">
+                <label for="username">用户名</label>
+                <input type="text" id="username" name="username" required placeholder="请输入用户名">
+            </div>
+            
+            <div class="form-group">
+                <label for="password">密码</label>
+                <input type="password" id="password" name="password" required placeholder="请输入密码">
+            </div>
+            
+            <div class="form-options">
+                <div class="remember-me">
+                    <input type="checkbox" id="remember" name="remember">
+                    <label for="remember">记住用户名</label>
+                </div>
+                <a href="#" class="forgot-password">忘记密码？</a>
+            </div>
+            
+            <button type="submit" class="login-btn">点击登录</button>
+        </form>
+        
+
+    </div>
+
+    <script src="/static/js/login.js"></script>
+</body>
+</html>

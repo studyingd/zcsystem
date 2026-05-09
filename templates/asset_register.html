@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>资产管理系统 - 资产登记</title>
+    <link rel="stylesheet" href="/static/css/index.css">
+    <link rel="stylesheet" href="/static/css/asset_register.css">
+</head>
+
+<body>
+    <div class="container page-enter">
+        <div class="header">
+            <h1>资产管理系统</h1>
+            <div class="header-nav">
+                <a href="/" class="nav-link">首页</a>
+                <a href="/asset_register" class="nav-link active">资产登记</a>
+                <a href="/vpn" class="nav-link">VPN记录</a>
+                <a href="/export?order=desc" class="export-icon" title="导出数据">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                </a>
+            </div>
+        </div>
+
+        <div class="module">
+            <h2>资产登记</h2>
+            <form id="assetRegisterForm">
+                <div class="form-group">
+                    <label>资产类型:</label>
+                    <select id="assetType" name="asset_type" required>
+                        <option value="">--请选择资产类型--</option>
+                        <option value="台式主机">台式主机</option>
+                        <option value="租聘台式主机">租聘台式主机</option>
+                        <option value="笔记本电脑">笔记本电脑</option>
+                        <option value="显示器">显示器</option>
+                        <option value="其它">其它</option>
+                    </select>
+                    <input type="text" id="customType" name="custom_type" placeholder="请输入自定义类型" style="display:none; margin-left:10px; flex:1;">
+                </div>
+
+                <div class="form-group" id="snField" style="display: none;">
+                    <label>SN码:</label>
+                    <input type="text" id="assetSN" name="asset_sn" placeholder="请输入SN码">
+                </div>
+
+                <div class="form-group">
+                    <label>资产规格:</label>
+                    <input type="text" id="assetSpec" name="asset_spec" required placeholder="请输入资产规格">
+                </div>
+
+                <div class="form-group">
+                    <label>使用部门:</label>
+                    <select id="assetDept" name="asset_dept">
+                        <option value="">--请选择部门--</option>
+                        <option value="FIN">FIN</option>
+                        <option value="HR">HR</option>
+                        <option value="SCM">SCM</option>
+                        <option value="STU">STU</option>
+                        <option value="GMO">GMO</option>
+                        <option value="COM">COM</option>
+                        <option value="CSG">CSG</option>
+                        <option value="PMD">PMD</option>
+                        <option value="IT">IT</option>
+                        <option value="SMG">SMG</option>
+                        <option value="证券事务部">证券事务部</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>使用人:</label>
+                    <input type="text" id="assetUser" name="asset_user" placeholder="请输入使用人">
+                </div>
+
+                <div class="form-group">
+                    <label>批量数量:</label>
+                    <input type="number" id="batchQuantity" name="batch_quantity" min="1" max="999" value="1" required>
+                    <span class="hint">（同时创建多个资产，编码自动连续）</span>
+                </div>
+
+                <div class="form-group">
+                    <label>资产年月:</label>
+                    <input type="month" id="assetYearMonth" name="asset_year_month">
+                </div>
+
+                <div id="configSection" class="config-section" style="display: none;">
+                    <h3>资产配置</h3>
+                    <div id="configFields"></div>
+                </div>
+
+                <div class="form-group">
+                    <label>编码预览:</label>
+                    <div id="codePreview" class="code-preview"></div>
+                </div>
+
+                <div class="form-actions">
+                    <button type="button" id="previewBtn" class="btn-secondary">预览编码</button>
+                    <button type="submit" class="btn-primary">确认登记</button>
+                </div>
+
+                <div id="registerMsg" class="msg-box" style="display: none;"></div>
+            </form>
+        </div>
+
+        <!-- 资产列表模块 -->
+        <div class="module">
+            <h2>资产列表</h2>
+            <div class="filter-group">
+                <label>选择月份:</label>
+                <select id="filterMonth">
+                    <option value="">全部月份</option>
+                </select>
+                <button type="button" id="refreshAssetList" class="btn-secondary">刷新</button>
+            </div>
+            <div id="assetListContainer" class="asset-list-container">
+                <div class="loading-tip">加载中...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 资产详情弹窗 -->
+    <div class="modal-overlay" id="assetDetailModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>资产详情</h3>
+                <button class="modal-close" id="closeAssetDetail">&times;</button>
+            </div>
+            <div class="modal-body" id="assetDetailContent"></div>
+        </div>
+    </div>
+
+    <script src="/static/js/asset_register.js"></script>
+    <script>
+    document.querySelectorAll('.nav-link').forEach(link => {
+        link.addEventListener('click', function(e) {
+            e.preventDefault();
+            const href = this.href;
+            const container = document.querySelector('.container');
+            container.classList.remove('page-enter');
+            container.classList.add('page-exit');
+            container.addEventListener('animationend', () => {
+                window.location.href = href;
+            }, { once: true });
+        });
+    });
+    </script>
+</body>
+
+</html>
