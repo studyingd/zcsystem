@@ -4,38 +4,89 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>系统登录</title>
-    <link rel="stylesheet" href="/static/css/login.css">
+    <link rel="stylesheet" href="/static/css/login.css?v=3">
 </head>
 <body>
-    <div class="login-container">
-        <h1 class="login-title">系统登录</h1>
-        
-        {% if error %}<div class="error-message">{{ error }}</div>{% endif %}
-        
-        <form action="/login" method="POST">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <div class="form-group">
-                <label for="username">用户名</label>
-                <input type="text" id="username" name="username" required placeholder="请输入用户名">
-            </div>
-            
-            <div class="form-group">
-                <label for="password">密码</label>
-                <input type="password" id="password" name="password" required placeholder="请输入密码">
-            </div>
-            
-            <div class="form-options">
-                <div class="remember-me">
-                    <input type="checkbox" id="remember" name="remember">
-                    <label for="remember">记住用户名</label>
+    <div class="login-wrapper">
+        <!-- 左侧品牌展示区 -->
+        <div class="login-brand">
+            <div class="brand-content">
+                <div class="brand-icon">
+                    <svg viewBox="0 0 24 24">
+                        <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                        <line x1="8" y1="21" x2="16" y2="21"></line>
+                        <line x1="12" y1="17" x2="12" y2="21"></line>
+                    </svg>
                 </div>
-                <a href="#" class="forgot-password">忘记密码？</a>
+                <h2 class="brand-title">资产管理系统</h2>
+                <p class="brand-desc">高效管理企业资产，实时掌控设备动态</p>
+                <div class="brand-features">
+                    <div class="brand-feature-item">
+                        <span class="brand-feature-dot"></span>
+                        资产信息统一管理
+                    </div>
+                    <div class="brand-feature-item">
+                        <span class="brand-feature-dot"></span>
+                        设备变更全程追踪
+                    </div>
+                    <div class="brand-feature-item">
+                        <span class="brand-feature-dot"></span>
+                        数据看板实时分析
+                    </div>
+                </div>
             </div>
-            
-            <button type="submit" class="login-btn">点击登录</button>
-        </form>
-        
+        </div>
 
+        <!-- 右侧登录表单区 -->
+        <div class="login-form-side">
+            <div class="login-container">
+                <div class="login-greeting">
+                    <h1>欢迎回来</h1>
+                    <p>请登录您的账户以继续</p>
+                </div>
+
+                {% if error %}
+                <div class="error-message">{{ error }}</div>
+                {% endif %}
+
+                <form action="/login" method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                    <div class="form-group">
+                        <label for="username">用户名</label>
+                        <div class="input-wrapper">
+                            <svg class="input-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                                <circle cx="12" cy="7" r="4"></circle>
+                            </svg>
+                            <input type="text" id="username" name="username" required placeholder="请输入用户名" autocomplete="username">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="password">密码</label>
+                        <div class="input-wrapper">
+                            <svg class="input-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                            </svg>
+                            <input type="password" id="password" name="password" required placeholder="请输入密码" autocomplete="current-password">
+                        </div>
+                    </div>
+
+                    <div class="form-options">
+                        <div class="remember-me">
+                            <input type="checkbox" id="remember" name="remember">
+                            <label for="remember">记住用户名</label>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="login-btn">登 录</button>
+                </form>
+
+                <div class="login-footer">Asset Management System v2.0</div>
+            </div>
+        </div>
     </div>
 
     <script src="/static/js/login.js"></script>
