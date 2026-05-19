@@ -17,13 +17,13 @@
         <button type="button" id="nextMonthBtn" class="month-quick-btn">下个月</button>
     </div>
 
-    <h3 class="section-title">实际采购数量</h3>
+    <h3 class="section-title" id="sectionPurchase">实际采购数量</h3>
     <div id="purchaseCards" class="dashboard-grid"></div>
 
-    <h3 class="section-title">当前库存</h3>
+    <h3 class="section-title" id="sectionStock">当前库存</h3>
     <div id="stockCards" class="dashboard-grid"></div>
 
-    <h3 class="section-title">资产领用</h3>
+    <h3 class="section-title" id="sectionMetric">资产领用</h3>
     <div id="metricCards" class="dashboard-grid"></div>
 </div>
 {% endblock %}
@@ -50,5 +50,6 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="/static/js/dashboard.js?v=12"></script>
+<script>var DASHBOARD_ADMIN = {{ admin | tojson }};</script>
+<script src="/static/js/dashboard.js?v=14"></script>
 {% endblock %}

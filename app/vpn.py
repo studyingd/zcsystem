@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 def vpn_page():
     if not session.get('logged_in'):
         return render_template('login.html')
-    return render_template('vpn.html', active_nav='vpn')
+    return render_template('vpn.html', active_nav='vpn', logged_in=True)
 
 
 @vpn_bp.route('/api/vpn_counts', methods=['GET'])

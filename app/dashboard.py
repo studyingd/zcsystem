@@ -137,16 +137,16 @@ STOCK_DETAIL_MAP = {
 
 @dashboard_bp.route('/dashboard')
 def dashboard_page():
-    if not session.get('logged_in'):
-        return render_template('login.html')
-    return render_template('dashboard.html', active_nav='dashboard')
+    return render_template('dashboard.html', active_nav='dashboard', logged_in=bool(session.get('logged_in')), admin=False)
+
+
+@dashboard_bp.route('/dashboard/admin')
+def dashboard_admin():
+    return render_template('dashboard.html', active_nav='dashboard', logged_in=bool(session.get('logged_in')), admin=True)
 
 
 @dashboard_bp.route('/api/dashboard_stats')
 def dashboard_stats():
-    if not session.get('logged_in'):
-        return jsonify({'status': 'error', 'message': '未登录'}), 401
-
     start_str = request.args.get('start', '')
     end_str = request.args.get('end', '')
 
@@ -242,6 +242,30 @@ def dashboard_stats():
                 'count': int(stock_data.get(key) or 0),
             })
 
+        # 应用手动覆盖值
+        cursor.execute(
+            "SELECT metric_key, override_value FROM dashboard_overrides WHERE period_start = %s AND period_end = %s",
+            (start_str, end_str)
+        )
+        overrides = {r['metric_key']: r['override_value'] for r in cursor.fetchall()}
+
+        for item in purchases:
+            if item['key'] in overrides:
+                item['current'] = overrides[item['key']]
+                item['diff'] = item['current'] - item['prev']
+                item['trend'] = 'up' if item['current'] > item['prev'] else ('down' if item['current'] < item['prev'] else 'same')
+                item['overridden'] = True
+        for item in metrics:
+            if item['key'] in overrides:
+                item['current'] = overrides[item['key']]
+                item['diff'] = item['current'] - item['prev']
+                item['trend'] = 'up' if item['current'] > item['prev'] else ('down' if item['current'] < item['prev'] else 'same')
+                item['overridden'] = True
+        for item in stocks:
+            if item['key'] in overrides:
+                item['count'] = overrides[item['key']]
+                item['overridden'] = True
+
         return jsonify({
             'status': 'success',
             'current_period': f'{start_str} ~ {end_str}',
@@ -271,9 +295,6 @@ PURCHASE_DETAIL_FIELDS = 'id, number, type, spec, department, name, sn, cpu, mem
 
 @dashboard_bp.route('/api/dashboard_purchase_detail')
 def dashboard_purchase_detail():
-    if not session.get('logged_in'):
-        return jsonify({'status': 'error', 'message': '未登录'}), 401
-
     key = request.args.get('key', '')
     start_str = request.args.get('start', '')
     end_str = request.args.get('end', '')
@@ -327,9 +348,6 @@ INVENTORY_DETAIL_FIELDS = 'id, number, department, site, type, datetime, status,
 
 @dashboard_bp.route('/api/dashboard_metric_detail')
 def dashboard_metric_detail():
-    if not session.get('logged_in'):
-        return jsonify({'status': 'error', 'message': '未登录'}), 401
-
     key = request.args.get('key', '')
     start_str = request.args.get('start', '')
     end_str = request.args.get('end', '')
@@ -408,9 +426,6 @@ def dashboard_metric_detail():
 # 库存明细：点击库存卡片查看详情
 @dashboard_bp.route('/api/dashboard_stock_detail')
 def dashboard_stock_detail():
-    if not session.get('logged_in'):
-        return jsonify({'status': 'error', 'message': '未登录'}), 401
-
     key = request.args.get('key', '')
     if key not in STOCK_DETAIL_MAP:
         return jsonify({'status': 'error', 'message': '无效的库存类型'}), 400
@@ -433,6 +448,109 @@ def dashboard_stock_detail():
             all_rows.extend(rows)
         return jsonify({'status': 'success', 'data': all_rows, 'title': config['title']})
     except Exception as e:
+        return jsonify({'status': 'error', 'message': '服务器内部错误'}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# --- 管理面板：覆盖值 CRUD ---
+ALL_DASHBOARD_KEYS = (
+    [k for k, _ in PURCHASE_KEYS] +
+    [k for k, _ in STOCK_KEYS] +
+    [k for k, _ in METRIC_KEYS]
+)
+
+ALL_DASHBOARD_LABELS = {k: n for k, n in PURCHASE_KEYS + STOCK_KEYS + METRIC_KEYS}
+
+
+@dashboard_bp.route('/api/dashboard_admin_overrides', methods=['GET'])
+def admin_get_overrides():
+    start = request.args.get('start', '')
+    end = request.args.get('end', '')
+    if not start or not end:
+        return jsonify({'status': 'error', 'message': '缺少日期参数'}), 400
+
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'status': 'error', 'message': '数据库连接失败'}), 500
+
+    try:
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            "SELECT id, metric_key, override_value FROM dashboard_overrides WHERE period_start = %s AND period_end = %s",
+            (start, end)
+        )
+        rows = cursor.fetchall()
+        overrides = {}
+        for r in rows:
+            overrides[r['metric_key']] = {'id': r['id'], 'value': r['override_value']}
+        return jsonify({'status': 'success', 'overrides': overrides, 'keys': ALL_DASHBOARD_KEYS, 'labels': ALL_DASHBOARD_LABELS})
+    except Exception as e:
+        logger.error("查询覆盖值失败: %s", e)
+        return jsonify({'status': 'error', 'message': '服务器内部错误'}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@dashboard_bp.route('/api/dashboard_admin_override', methods=['POST'])
+def admin_save_override():
+    start = request.form.get('start', '')
+    end = request.form.get('end', '')
+    key = request.form.get('key', '')
+    value = request.form.get('value', '')
+
+    if not all([start, end, key, value]):
+        return jsonify({'status': 'error', 'message': '参数不完整'}), 400
+    if key not in ALL_DASHBOARD_KEYS:
+        return jsonify({'status': 'error', 'message': '无效的指标'}), 400
+    try:
+        value = int(value)
+    except ValueError:
+        return jsonify({'status': 'error', 'message': '值必须为整数'}), 400
+
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'status': 'error', 'message': '数据库连接失败'}), 500
+
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """INSERT INTO dashboard_overrides (metric_key, period_start, period_end, override_value)
+               VALUES (%s, %s, %s, %s)
+               ON DUPLICATE KEY UPDATE override_value = %s""",
+            (key, start, end, value, value)
+        )
+        conn.commit()
+        return jsonify({'status': 'success', 'message': '保存成功'})
+    except Exception as e:
+        conn.rollback()
+        logger.error("保存覆盖值失败: %s", e)
+        return jsonify({'status': 'error', 'message': '服务器内部错误'}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@dashboard_bp.route('/api/dashboard_admin_override', methods=['DELETE'])
+def admin_delete_override():
+    override_id = request.args.get('id', '')
+    if not override_id.isdigit():
+        return jsonify({'status': 'error', 'message': '无效ID'}), 400
+
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'status': 'error', 'message': '数据库连接失败'}), 500
+
+    try:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM dashboard_overrides WHERE id = %s", (int(override_id),))
+        conn.commit()
+        return jsonify({'status': 'success', 'message': '已删除'})
+    except Exception as e:
+        conn.rollback()
+        logger.error("删除覆盖值失败: %s", e)
         return jsonify({'status': 'error', 'message': '服务器内部错误'}), 500
     finally:
         cursor.close()

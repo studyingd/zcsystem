@@ -34,6 +34,10 @@ window.addEventListener('DOMContentLoaded', () => {
 
     updateMonthBtns();
     loadStats();
+
+    if (typeof DASHBOARD_ADMIN !== 'undefined' && DASHBOARD_ADMIN) {
+        setTimeout(() => openAdminPanel(), 500);
+    }
 });
 
 function updateMonthBtns() {
@@ -79,6 +83,8 @@ function paginationHtml(total, totalPages, page) {
     return html;
 }
 
+let _cachedStats = { purchases: [], stocks: [], metrics: [] };
+
 function getStart() { return document.getElementById('dashboardStart').value; }
 function getEnd() { return document.getElementById('dashboardEnd').value; }
 
@@ -114,6 +120,7 @@ function loadStats() {
             renderPurchaseCards(res.purchases, res.prev_period);
             renderStockCards(res.stocks);
             renderMetricCards(res.metrics, res.prev_period);
+            _cachedStats = { purchases: res.purchases, stocks: res.stocks, metrics: res.metrics };
         })
         .catch(() => {
             purchaseContainer.innerHTML = '<div style="text-align:center;color:#dc3545;">加载失败</div>';
@@ -403,4 +410,199 @@ function renderMetricCardsList(rows) {
             </div>
         </div>
     `).join('');
+}
+
+// --- 管理面板 ---
+function openAdminPanel() {
+    const start = getStart();
+    const end = getEnd();
+
+    const existing = document.getElementById('adminModal');
+    if (existing) { existing.style.display = 'flex'; loadAdminData(); return; }
+
+    const modal = document.createElement('div');
+    modal.className = 'custom-modal';
+    modal.id = 'adminModal';
+    modal.style.cssText = 'display:flex;';
+
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width:540px;width:92vw;max-height:85vh;overflow-y:auto;overflow-x:hidden;">
+            <div class="modal-header-bar">
+                <span class="modal-header-title">数据管理</span>
+                <button class="modal-close-btn" id="adminClose">&times;</button>
+            </div>
+            <div style="padding:8px 12px 0;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                <input type="date" id="adminStart" value="${escapeHtml(start)}" style="padding:4px 6px;border:1px solid #ccc;border-radius:3px;flex:1;min-width:120px;">
+                <span>~</span>
+                <input type="date" id="adminEnd" value="${escapeHtml(end)}" style="padding:4px 6px;border:1px solid #ccc;border-radius:3px;flex:1;min-width:120px;">
+                <button id="adminLoadBtn" style="padding:4px 12px;background:#007bff;color:#fff;border:none;border-radius:3px;cursor:pointer;white-space:nowrap;">查询</button>
+            </div>
+            <div id="adminBody" style="padding:12px;">
+                <div style="text-align:center;color:#999;padding:20px;">加载中...</div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    modal.addEventListener('click', function(e) { if (e.target === modal) closeAdminPanel(); });
+    document.getElementById('adminClose').addEventListener('click', closeAdminPanel);
+    document.getElementById('adminLoadBtn').addEventListener('click', loadAdminData);
+    loadAdminData();
+}
+
+function closeAdminPanel() {
+    const modal = document.getElementById('adminModal');
+    if (modal) modal.style.display = 'none';
+}
+
+function loadAdminData() {
+    const body = document.getElementById('adminBody');
+    body.innerHTML = '<div style="text-align:center;color:#999;padding:20px;">加载中...</div>';
+
+    const start = document.getElementById('adminStart').value;
+    const end = document.getElementById('adminEnd').value;
+    if (!start || !end) { body.innerHTML = '<div style="color:#dc3545;">请选择起止日期</div>'; return; }
+
+    fetch(`/api/dashboard_admin_overrides?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`)
+        .then(r => r.json())
+        .then(res => {
+            if (res.status !== 'success') {
+                body.innerHTML = `<div style="color:#dc3545;">${escapeHtml(res.message)}</div>`;
+                return;
+            }
+            // Load stats for the selected period to get computed values
+            fetch(`/api/dashboard_stats?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`)
+                .then(r2 => r2.json())
+                .then(stats => {
+                    if (stats.status !== 'success') {
+                        body.innerHTML = `<div style="color:#dc3545;">${escapeHtml(stats.message)}</div>`;
+                        return;
+                    }
+                    _cachedStats = { purchases: stats.purchases, stocks: stats.stocks, metrics: stats.metrics };
+                    renderAdminForm(res, _cachedStats);
+                });
+        })
+        .catch(() => {
+            body.innerHTML = '<div style="color:#dc3545;">加载失败</div>';
+        });
+}
+
+function renderAdminForm(adminRes, stats) {
+    const body = document.getElementById('adminBody');
+    const overrides = adminRes.overrides;
+    const labels = adminRes.labels;
+
+    const purchaseKeys = ['laptop', 'monitor', 'desktop', 'rental_desktop'];
+    const stockKeys = ['new_laptop_stock', 'old_laptop_stock', 'new_monitor_stock', 'old_monitor_stock', 'desktop_stock', 'rental_stock'];
+    const metricKeys = ['new_laptop', 'old_laptop', 'new_monitor', 'old_monitor', 'desktop', 'rental'];
+
+    function renderGroup(title, keys, getValue) {
+        let html = `<h4 style="margin:12px 0 6px;font-size:13px;color:#333;">${title}</h4>`;
+        html += `<table style="width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed;">`;
+        html += `<colgroup><col style="width:auto;"><col style="width:54px;"><col style="width:62px;"><col style="width:40px;"></colgroup>`;
+        html += `<tr style="background:#f5f5f5;"><th style="padding:4px 6px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">指标</th><th style="padding:4px 2px;text-align:center;">计算</th><th style="padding:4px 2px;text-align:center;">覆盖</th><th style="padding:4px 2px;"></th></tr>`;
+        keys.forEach(key => {
+            const label = labels[key] || key;
+            const currentVal = getValue(key);
+            const ov = overrides[key];
+            const isOverridden = !!ov;
+            const displayVal = isOverridden ? ov.value : currentVal;
+            const rowBg = isOverridden ? 'background:#fff8e1;' : '';
+            html += `<tr style="${rowBg}border-bottom:1px solid #eee;">`;
+            html += `<td style="padding:4px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(label)}">${escapeHtml(label)}</td>`;
+            html += `<td style="padding:4px 2px;color:#999;text-align:center;">${currentVal}</td>`;
+            html += `<td style="padding:4px 2px;"><input type="number" data-key="${escapeHtml(key)}" data-computed="${currentVal}" value="${displayVal}" style="width:100%;padding:2px 4px;border:1px solid #ccc;border-radius:3px;text-align:center;font-size:12px;" min="0"></td>`;
+            html += `<td style="padding:4px 2px;text-align:center;">`;
+            if (isOverridden) {
+                html += `<button class="admin-reset-btn" data-key="${escapeHtml(key)}" data-id="${ov.id}" style="background:none;border:none;color:#dc3545;cursor:pointer;font-size:11px;padding:0;" title="恢复计算值">恢复</button>`;
+            }
+            html += `</td></tr>`;
+        });
+        html += `</table>`;
+        return html;
+    }
+
+    let html = '';
+    html += renderGroup('实际采购数量', purchaseKeys, key => {
+        const item = stats.purchases.find(p => p.key === key);
+        return item ? item.current : 0;
+    });
+    html += renderGroup('当前库存', stockKeys, key => {
+        const item = stats.stocks.find(s => s.key === key);
+        return item ? item.count : 0;
+    });
+    html += renderGroup('资产领用', metricKeys, key => {
+        const item = stats.metrics.find(m => m.key === key);
+        return item ? item.current : 0;
+    });
+    html += `<div style="margin-top:16px;text-align:right;"><button id="adminSaveAllBtn" style="padding:8px 20px;background:#007bff;color:#fff;border:none;border-radius:4px;cursor:pointer;">保存全部</button></div>`;
+    html += `<div id="adminMsg" style="margin-top:8px;font-size:13px;"></div>`;
+
+    body.innerHTML = html;
+
+    body.querySelectorAll('.admin-reset-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id = btn.dataset.id;
+            fetch(`/api/dashboard_admin_override?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
+                .then(r => r.json())
+                .then(res => {
+                    if (res.status === 'success') {
+                        loadAdminData();
+                        loadStats();
+                    }
+                });
+        });
+    });
+
+    document.getElementById('adminSaveAllBtn').addEventListener('click', () => {
+        const start = document.getElementById('adminStart').value;
+        const end = document.getElementById('adminEnd').value;
+        const inputs = body.querySelectorAll('input[data-key]');
+        const msgEl = document.getElementById('adminMsg');
+
+        let promises = [];
+        inputs.forEach(input => {
+            const key = input.dataset.key;
+            const value = input.value;
+            const computed = parseInt(input.dataset.computed) || 0;
+            if (value === '' || isNaN(value)) return;
+            const intVal = parseInt(value);
+
+            if (intVal === computed) {
+                const ov = overrides[key];
+                if (ov) {
+                    promises.push(
+                        fetch(`/api/dashboard_admin_override?id=${encodeURIComponent(ov.id)}`, { method: 'DELETE' })
+                            .then(r => r.json())
+                    );
+                }
+            } else {
+                promises.push(
+                    fetch('/api/dashboard_admin_override', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: `start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&key=${encodeURIComponent(key)}&value=${encodeURIComponent(value)}`
+                    }).then(r => r.json())
+                );
+            }
+        });
+
+        if (promises.length === 0) {
+            msgEl.style.color = '#28a745';
+            msgEl.textContent = '没有需要保存的变更';
+            return;
+        }
+        Promise.all(promises).then(results => {
+            const failed = results.filter(r => r.status !== 'success');
+            if (failed.length === 0) {
+                msgEl.style.color = '#28a745';
+                msgEl.textContent = '保存成功';
+                loadStats();
+                loadAdminData();
+            } else {
+                msgEl.style.color = '#dc3545';
+                msgEl.textContent = `${failed.length} 项保存失败`;
+            }
+        });
+    });
 }

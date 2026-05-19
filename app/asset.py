@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 def asset_register():
     if not session.get('logged_in'):
         return redirect(url_for('auth.login'))
-    return render_template('asset_register.html', active_nav='asset_register')
+    return render_template('asset_register.html', active_nav='asset_register', logged_in=True)
 
 # 生成资产编码（预览用）
 @asset_bp.route('/api/generate_asset_codes', methods=['POST'])

@@ -17,5 +17,8 @@ wheels/
 *.jpg
 *.jpeg
 
+# claude
+.claude/
+
 # Credentials
 user.txt

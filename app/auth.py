@@ -69,11 +69,9 @@ def logout():
     return redirect(url_for('auth.login'))
 
 
-# 默认进入资产看板
+# 默认进入资产看板（无需登录）
 @auth_bp.route('/')
 def index():
-    if not session.get('logged_in'):
-        return redirect(url_for('auth.login'))
     return redirect(url_for('dashboard.dashboard_page'))
 
 
@@ -82,4 +80,4 @@ def index():
 def asset_change():
     if not session.get('logged_in'):
         return redirect(url_for('auth.login'))
-    return render_template('index.html', active_nav='asset_change')
+    return render_template('index.html', active_nav='asset_change', logged_in=True)

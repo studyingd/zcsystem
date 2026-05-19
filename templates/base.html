@@ -16,6 +16,7 @@
             <h1>资产管理系统</h1>
             <div class="header-nav">
                 <a href="/dashboard" class="nav-link {% if active_nav == 'dashboard' %}active{% endif %}">资产看板</a>
+                {% if logged_in %}
                 <a href="/asset_change" class="nav-link {% if active_nav == 'asset_change' %}active{% endif %}">资产变更</a>
                 <a href="/asset_register" class="nav-link {% if active_nav == 'asset_register' %}active{% endif %}">资产登记</a>
                 <a href="/vpn" class="nav-link {% if active_nav == 'vpn' %}active{% endif %}">VPN记录</a>
@@ -26,6 +27,9 @@
                         <line x1="12" y1="15" x2="12" y2="3"></line>
                     </svg>
                 </a>
+                {% else %}
+                <a href="/login" class="nav-link">登录</a>
+                {% endif %}
             </div>
         </div>
 
