@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}资产管理系统{% endblock %}</title>
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <link rel="stylesheet" href="/static/css/index.css">
+    {% block extra_css %}{% endblock %}
+</head>
+
+<body>
+    <div class="container page-enter">
+        <div class="header">
+            <h1>资产管理系统</h1>
+            <div class="header-nav">
+                <a href="/dashboard" class="nav-link {% if active_nav == 'dashboard' %}active{% endif %}">资产看板</a>
+                <a href="/asset_change" class="nav-link {% if active_nav == 'asset_change' %}active{% endif %}">资产变更</a>
+                <a href="/asset_register" class="nav-link {% if active_nav == 'asset_register' %}active{% endif %}">资产登记</a>
+                <a href="/vpn" class="nav-link {% if active_nav == 'vpn' %}active{% endif %}">VPN记录</a>
+                <a href="/export?order=desc" class="export-icon" title="导出数据">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                </a>
+            </div>
+        </div>
+
+        {% block content %}{% endblock %}
+    </div>
+
+    {% block modals %}{% endblock %}
+
+    <script src="/static/js/utils.js"></script>
+    <script>
+    // 全局 fetch 封装：POST/PUT/DELETE 请求自动携带 CSRF token
+    const _originalFetch = window.fetch;
+    window.fetch = function(url, options = {}) {
+        const method = (options.method || 'GET').toUpperCase();
+        if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(method)) {
+            const token = document.querySelector('meta[name="csrf-token"]')?.content || '';
+            options.headers = options.headers || {};
+            if (token && !options.headers['X-CSRFToken']) {
+                options.headers['X-CSRFToken'] = token;
+            }
+        }
+        return _originalFetch(url, options);
+    };
+    </script>
+    {% block extra_js %}{% endblock %}
+    <script>
+    document.querySelectorAll('.nav-link').forEach(link => {
+        link.addEventListener('click', function(e) {
+            e.preventDefault();
+            const href = this.href;
+            const container = document.querySelector('.container');
+            container.classList.remove('page-enter');
+            container.classList.add('page-exit');
+            container.addEventListener('animationend', () => {
+                window.location.href = href;
+            }, { once: true });
+        });
+    });
+    </script>
+</body>
+
+</html>

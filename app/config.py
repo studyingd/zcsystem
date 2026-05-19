@@ -1,8 +1,11 @@
 import mysql.connector
-from mysql.connector import Error
+from mysql.connector import Error, pooling
 import boto3
 from botocore.client import Config
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 DB_CONFIG = {
     'host': os.environ['DB_HOST'],
@@ -12,6 +15,8 @@ DB_CONFIG = {
     'charset': 'utf8mb4',
     'use_pure': True
 }
+
+_db_pool = pooling.MySQLConnectionPool(pool_name='zcsystem_pool', pool_size=5, **DB_CONFIG)
 
 RUSTFS_CONFIG = {
     'endpoint_url': os.environ['S3_ENDPOINT'],
@@ -23,10 +28,9 @@ RUSTFS_CONFIG = {
 
 def get_db_connection():
     try:
-        conn = mysql.connector.connect(**DB_CONFIG)
-        return conn
+        return _db_pool.get_connection()
     except Error as e:
-        print(f"数据库连接错误: {e}")
+        logger.error("数据库连接错误: %s", e)
         return None
 
 

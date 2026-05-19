@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}资产管理系统 - 资产看板{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/dashboard.css?v=8">
+{% endblock %}
+
+{% block content %}
+<div class="module">
+    <h2>资产看板</h2>
+    <div class="dashboard-month-picker">
+        <input type="date" id="dashboardStart">
+        <span class="range-sep">~</span>
+        <input type="date" id="dashboardEnd">
+        <button type="button" id="lastMonthBtn" class="month-quick-btn">上个月</button>
+        <button type="button" id="nextMonthBtn" class="month-quick-btn">下个月</button>
+    </div>
+
+    <h3 class="section-title">实际采购数量</h3>
+    <div id="purchaseCards" class="dashboard-grid"></div>
+
+    <h3 class="section-title">当前库存</h3>
+    <div id="stockCards" class="dashboard-grid"></div>
+
+    <h3 class="section-title">资产领用</h3>
+    <div id="metricCards" class="dashboard-grid"></div>
+</div>
+{% endblock %}
+
+{% block modals %}
+<!-- 明细弹窗 -->
+<div class="custom-modal" id="detailModal" style="display:none;">
+    <div class="modal-content detail-modal-content">
+        <div class="modal-header-bar">
+            <span class="modal-header-title" id="detailTitle"></span>
+            <button class="modal-close-btn" id="detailClose">&times;</button>
+        </div>
+        <div id="detailFilters" style="display:none;">
+            <div class="detail-filter-row">
+                <label>部门筛选：</label>
+                <select id="filterDept"><option value="">全部部门</option></select>
+                <label>标签筛选：</label>
+                <select id="filterTag"><option value="">全部标签</option></select>
+            </div>
+        </div>
+        <div id="detailCards" class="query-card-list detail-card-list"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="/static/js/dashboard.js?v=12"></script>
+{% endblock %}

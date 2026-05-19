@@ -1,82 +1,46 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
+{% extends "base.html" %}
 
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>资产管理系统 - VPN记录</title>
-    <link rel="stylesheet" href="/static/css/index.css">
-</head>
+{% block title %}资产管理系统 - VPN记录{% endblock %}
 
-<body>
-    <div class="container page-enter">
-        <div class="header">
-            <h1>资产管理系统</h1>
-            <div class="header-nav">
-                <a href="/" class="nav-link">首页</a>
-                <a href="/asset_register" class="nav-link">资产登记</a>
-                <a href="/vpn" class="nav-link active">VPN记录</a>
-                <a href="/export?order=desc" class="export-icon" title="导出数据">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                        <polyline points="7 10 12 15 17 10"></polyline>
-                        <line x1="12" y1="15" x2="12" y2="3"></line>
-                    </svg>
-                </a>
-            </div>
-        </div>
-
-        <div class="module">
-            <h2>VPN使用记录</h2>
-            <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
-                <div class="overview-cards" id="vpnOverviewCards" style="margin:0;"></div>
-                <button type="button" id="vpnAddBtn" class="btn-secondary" style="margin:0;white-space:nowrap;padding:10px 18px;">+ 新增记录</button>
-            </div>
-            <div id="vpnInsertArea" style="display:none;margin-bottom:20px;"></div>
-            <div id="vpnDataArea" style="display:none;">
-                <div class="preview-header">
-                    <span class="preview-title" id="vpnPreviewTitle"></span>
-                    <button class="preview-back-btn" id="vpnBackBtn">&larr; 返回</button>
-                </div>
-                <div class="query-card-list" id="vpnCardList"></div>
-            </div>
-        </div>
-
-        <!-- VPN详情弹窗 -->
-        <div class="custom-modal" id="vpnDetailModal" style="display:none;">
-            <div class="modal-content">
-                <div class="modal-header-bar">
-                    <span class="modal-header-title">VPN记录详情</span>
-                    <div id="vpnDetailActions" style="display:flex;gap:8px;margin-left:auto;">
-                        <button class="detail-action-btn" id="vpnEditBtn" title="修改">
-                            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10.5 2.5l3 3L5 14H2v-3L10.5 2.5z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                        </button>
-                        <button class="detail-action-btn btn-danger" id="vpnDeleteBtn" title="删除">
-                            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M5.33 4V2.67a1.33 1.33 0 011.34-1.34h2.66a1.33 1.33 0 011.34 1.34V4m2 0v9.33a1.33 1.33 0 01-1.34 1.34H4.67a1.33 1.33 0 01-1.34-1.34V4h9.34z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                        </button>
-                    </div>
-                    <button class="modal-close-btn" id="vpnDetailClose">&times;</button>
-                </div>
-                <div id="vpnDetailBody"></div>
-            </div>
-        </div>
+{% block content %}
+<div class="module">
+    <h2>VPN使用记录</h2>
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
+        <div class="overview-cards" id="vpnOverviewCards" style="margin:0;"></div>
+        <button type="button" id="vpnAddBtn" class="btn-secondary" style="margin:0;white-space:nowrap;padding:10px 18px;">+ 新增记录</button>
     </div>
+    <div id="vpnInsertArea" style="display:none;margin-bottom:20px;"></div>
+    <div id="vpnDataArea" style="display:none;">
+        <div class="preview-header">
+            <span class="preview-title" id="vpnPreviewTitle"></span>
+            <button class="preview-back-btn" id="vpnBackBtn">&larr; 返回</button>
+        </div>
+        <div class="query-card-list" id="vpnCardList"></div>
+    </div>
+</div>
+{% endblock %}
 
-    <script src="/static/js/vpn.js"></script>
-    <script>
-    document.querySelectorAll('.nav-link').forEach(link => {
-        link.addEventListener('click', function(e) {
-            e.preventDefault();
-            const href = this.href;
-            const container = document.querySelector('.container');
-            container.classList.remove('page-enter');
-            container.classList.add('page-exit');
-            container.addEventListener('animationend', () => {
-                window.location.href = href;
-            }, { once: true });
-        });
-    });
-    </script>
-</body>
+{% block modals %}
+<!-- VPN详情弹窗 -->
+<div class="custom-modal" id="vpnDetailModal" style="display:none;">
+    <div class="modal-content">
+        <div class="modal-header-bar">
+            <span class="modal-header-title">VPN记录详情</span>
+            <div id="vpnDetailActions" style="display:flex;gap:8px;margin-left:auto;">
+                <button class="detail-action-btn" id="vpnEditBtn" title="修改">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10.5 2.5l3 3L5 14H2v-3L10.5 2.5z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+                <button class="detail-action-btn btn-danger" id="vpnDeleteBtn" title="删除">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M5.33 4V2.67a1.33 1.33 0 011.34-1.34h2.66a1.33 1.33 0 011.34 1.34V4m2 0v9.33a1.33 1.33 0 01-1.34 1.34H4.67a1.33 1.33 0 01-1.34-1.34V4h9.34z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+            </div>
+            <button class="modal-close-btn" id="vpnDetailClose">&times;</button>
+        </div>
+        <div id="vpnDetailBody"></div>
+    </div>
+</div>
+{% endblock %}
 
-</html>
+{% block extra_js %}
+<script src="/static/js/vpn.js"></script>
+{% endblock %}

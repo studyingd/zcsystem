@@ -121,10 +121,10 @@ function updateCodePreview() {
                 let html = '';
                 const codes = res.codes;
                 for (let i = 0; i < Math.min(codes.length, 20); i++) {
-                    html += `<div class="code-preview-item">${codes[i]}</div>`;
+                    html += `<div class="code-preview-item">${escapeHtml(codes[i])}</div>`;
                 }
                 if (codes.length > 20) {
-                    html += `<div class="code-preview-item" style="color: #6c757d;">... 共 ${codes.length} 个编码</div>`;
+                    html += `<div class="code-preview-item" style="color: #6c757d;">... 共 ${escapeHtml(String(codes.length))} 个编码</div>`;
                 }
                 codePreview.innerHTML = html;
             } else {
@@ -265,7 +265,7 @@ function loadAssetList() {
 
     let url = '/api/get_all_assets';
     if (currentMonth) {
-        url += `?month=${currentMonth}`;
+        url += `?month=${encodeURIComponent(currentMonth)}`;
     }
 
     fetch(url)
@@ -273,7 +273,6 @@ function loadAssetList() {
         .then(res => {
             if (res.status === 'success') {
                 renderMonthOptions(res.months);
-                // Cache all rows for detail lookup
                 window._assetRows = [];
                 for (const month in res.grouped) {
                     window._assetRows = window._assetRows.concat(res.grouped[month]['DZ'] || []);
@@ -296,8 +295,8 @@ function renderMonthOptions(months) {
 
     filterMonth.innerHTML = '<option value="">全部月份</option>';
     months.forEach(month => {
-        const label = `20${month.slice(0, 2)}年${month.slice(2, 4)}月`;
-        filterMonth.innerHTML += `<option value="${month}">${label}</option>`;
+        const label = `20${escapeHtml(month.slice(0, 2))}年${escapeHtml(month.slice(2, 4))}月`;
+        filterMonth.innerHTML += `<option value="${escapeHtml(month)}">${label}</option>`;
     });
 
     if (currentValue && filterMonth.querySelector(`option[value="${currentValue}"]`)) {
@@ -324,14 +323,12 @@ function renderAssetListByGroup(grouped) {
     }
 
     let html = '';
-
-    // 按月份分组显示
     const sortedMonths = Object.keys(grouped).sort((a, b) => b.localeCompare(a));
 
     sortedMonths.forEach(month => {
         const dzAssets = grouped[month]['DZ'] || [];
         const zlAssets = grouped[month]['ZL'] || [];
-        const monthLabel = `20${month.slice(0, 2)}年${month.slice(2, 4)}月`;
+        const monthLabel = `20${escapeHtml(month.slice(0, 2))}年${escapeHtml(month.slice(2, 4))}月`;
 
         html += `
             <div class="month-group">
@@ -366,6 +363,7 @@ function getBrandIcon(spec) {
     if (s.includes('AOC')) return baseUrl + 'AOC.png';
     if (s.includes('EDY')) return baseUrl + 'EDY.png';
     if (s.includes('MAC') || s.includes('APPLE')) return baseUrl + 'Apple.png';
+    if (s.includes('LENOVO')) return baseUrl + 'Lenovo.webp';
     return '';
 }
 
@@ -377,13 +375,13 @@ function renderColumnItems(assets) {
     let html = '<div class="asset-grid">';
     assets.forEach(item => {
         const iconUrl = getBrandIcon(item.spec);
-        const iconHtml = iconUrl ? `<img src="${iconUrl}" class="brand-icon" alt="brand">` : '';
+        const iconHtml = iconUrl ? `<img src="${escapeHtml(iconUrl)}" class="brand-icon" alt="brand">` : '';
         html += `
-            <div class="asset-item" onclick="showAssetDetail(${item.id})" style="cursor:pointer;">
+            <div class="asset-item" onclick="showAssetDetail(${escapeHtml(String(item.id))})" style="cursor:pointer;">
                 ${iconHtml}
-                <div class="asset-number">${item.number}</div>
-                <div class="asset-info">${item.type || '-'}</div>
-                <div class="asset-info">${item.name || '-'}</div>
+                <div class="asset-number">${escapeHtml(item.number)}</div>
+                <div class="asset-info">${escapeHtml(item.type) || '-'}</div>
+                <div class="asset-info">${escapeHtml(item.name) || '-'}</div>
             </div>
         `;
     });
@@ -402,7 +400,7 @@ function showAssetDetail(assetId) {
 
     if (!assetData) {
         // If not found in cached data, need to fetch
-        fetch(`/api/get_asset_detail?id=${assetId}`)
+        fetch(`/api/get_asset_detail?id=${encodeURIComponent(assetId)}`)
             .then(response => response.json())
             .then(res => {
                 if (res.status === 'success') {
@@ -421,30 +419,30 @@ function displayAssetDetailModal(asset) {
     const content = document.getElementById('assetDetailContent');
 
     const iconUrl = getBrandIcon(asset.spec);
-    const iconHtml = iconUrl ? `<img src="${iconUrl}" class="detail-brand-icon" alt="brand">` : '';
+    const iconHtml = iconUrl ? `<img src="${escapeHtml(iconUrl)}" class="detail-brand-icon" alt="brand">` : '';
 
     let html = `
         <div style="position:relative;">
             ${iconHtml}
             <div class="detail-row">
                 <label>资产编码:</label>
-                <span class="detail-value number">${asset.number}</span>
+                <span class="detail-value number">${escapeHtml(asset.number)}</span>
             </div>
             <div class="detail-row">
                 <label>资产类型:</label>
-                <span class="detail-value">${asset.type || '-'}</span>
+                <span class="detail-value">${escapeHtml(asset.type) || '-'}</span>
             </div>
             <div class="detail-row">
                 <label>资产规格:</label>
-                <span class="detail-value">${asset.spec || '-'}</span>
+                <span class="detail-value">${escapeHtml(asset.spec) || '-'}</span>
             </div>
             <div class="detail-row">
                 <label>使用部门:</label>
-                <span class="detail-value">${asset.department || '-'}</span>
+                <span class="detail-value">${escapeHtml(asset.department) || '-'}</span>
             </div>
             <div class="detail-row">
                 <label>使用人:</label>
-                <span class="detail-value">${asset.name || '-'}</span>
+                <span class="detail-value">${escapeHtml(asset.name) || '-'}</span>
             </div>
         </div>
     `;
@@ -454,7 +452,7 @@ function displayAssetDetailModal(asset) {
         html += `
             <div class="detail-row">
                 <label>SN码:</label>
-                <span class="detail-value">${asset.sn}</span>
+                <span class="detail-value">${escapeHtml(asset.sn)}</span>
             </div>
         `;
     }
@@ -466,19 +464,19 @@ function displayAssetDetailModal(asset) {
                 <h4>硬件配置</h4>
                 <div class="detail-row">
                     <label>CPU:</label>
-                    <span class="detail-value">${asset.cpu || '-'}</span>
+                    <span class="detail-value">${escapeHtml(asset.cpu) || '-'}</span>
                 </div>
                 <div class="detail-row">
                     <label>内存:</label>
-                    <span class="detail-value">${asset.mem || '-'}</span>
+                    <span class="detail-value">${escapeHtml(asset.mem) || '-'}</span>
                 </div>
                 <div class="detail-row">
                     <label>硬盘:</label>
-                    <span class="detail-value">${asset.disk || '-'}</span>
+                    <span class="detail-value">${escapeHtml(asset.disk) || '-'}</span>
                 </div>
                 <div class="detail-row">
                     <label>显卡:</label>
-                    <span class="detail-value">${asset.gpu || '-'}</span>
+                    <span class="detail-value">${escapeHtml(asset.gpu) || '-'}</span>
                 </div>
             </div>
         `;

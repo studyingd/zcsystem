@@ -1,23 +1,10 @@
-let vpnData = [];
+let vpnCounts = {};
+let vpnTotal = 0;
 let activeDepartment = null;
 let vpnCurrentPage = 1;
 const VPN_PAGE_SIZE = 20;
 
-// 部门选项
-const VPN_DEPT_OPTIONS = [
-    {value: '', text: '--请选择部门--'},
-    {value: 'FIN', text: 'FIN'},
-    {value: 'HR', text: 'HR'},
-    {value: 'SCM', text: 'SCM'},
-    {value: 'STU', text: 'STU'},
-    {value: 'GMO', text: 'GMO'},
-    {value: 'COM', text: 'COM'},
-    {value: 'CSG', text: 'CSG'},
-    {value: 'PMD', text: 'PMD'},
-    {value: 'IT', text: 'IT'},
-    {value: 'SMG', text: 'SMG'},
-    {value: '证券事务部', text: '证券事务部'}
-];
+// 部门选项使用 utils.js 中的 DEPARTMENTS
 
 // 终端选项
 const VPN_TERMINAL_OPTIONS = [
@@ -33,20 +20,21 @@ const VPN_APPTYPE_OPTIONS = [
 ];
 
 window.addEventListener('DOMContentLoaded', () => {
-    loadVpnData();
+    loadVpnCounts();
     bindAddBtn();
     bindModalClose();
 });
 
-function loadVpnData() {
-    fetch('/api/vpn_records')
+function loadVpnCounts() {
+    fetch('/api/vpn_counts')
         .then(response => {
             if (!response.ok) throw new Error('网络请求失败');
             return response.json();
         })
         .then(res => {
             if (res.status === 'success') {
-                vpnData = res.data;
+                vpnCounts = res.counts;
+                vpnTotal = res.total;
                 renderVpnOverviewCards();
                 if (activeDepartment !== null) {
                     const card = document.querySelector(`.overview-card[data-dept="${activeDepartment}"]`);
@@ -72,18 +60,11 @@ function loadVpnData() {
 function renderVpnOverviewCards() {
     const container = document.getElementById('vpnOverviewCards');
 
-    const deptMap = {};
-    vpnData.forEach(item => {
-        const dept = item.department || '未知';
-        if (!deptMap[dept]) deptMap[dept] = 0;
-        deptMap[dept]++;
-    });
-
-    const sortedDepts = Object.entries(deptMap).sort((a, b) => b[1] - a[1]);
+    const sortedDepts = Object.entries(vpnCounts).sort((a, b) => b[1] - a[1]);
 
     let html = `
         <div class="overview-card" data-dept="all">
-            <div class="overview-card-count" style="color:#007bff;">${vpnData.length}</div>
+            <div class="overview-card-count" style="color:#007bff;">${escapeHtml(String(vpnTotal))}</div>
             <div class="overview-card-label">全部</div>
         </div>
     `;
@@ -92,9 +73,9 @@ function renderVpnOverviewCards() {
     sortedDepts.forEach(([dept, count], index) => {
         const color = colors[index % colors.length];
         html += `
-            <div class="overview-card" data-dept="${dept}">
-                <div class="overview-card-count" style="color:${color};">${count}</div>
-                <div class="overview-card-label">${dept}</div>
+            <div class="overview-card" data-dept="${escapeHtml(dept)}">
+                <div class="overview-card-count" style="color:${color};">${escapeHtml(String(count))}</div>
+                <div class="overview-card-label">${escapeHtml(dept)}</div>
             </div>
         `;
     });
@@ -126,66 +107,74 @@ function showVpnCards(dept, page) {
     const cardList = document.getElementById('vpnCardList');
     const title = document.getElementById('vpnPreviewTitle');
 
-    let data = [];
-    if (dept === 'all') {
-        data = vpnData;
-    } else {
-        data = vpnData.filter(item => (item.department || '未知') === dept);
-    }
+    cardList.innerHTML = '<div style="text-align:center;color:#999;padding:40px;">加载中...</div>';
 
-    const totalPages = Math.ceil(data.length / VPN_PAGE_SIZE);
-    const label = dept === 'all' ? '全部' : dept;
-    title.textContent = `${label}（共 ${data.length} 条${totalPages > 1 ? `，第 ${page}/${totalPages} 页` : ''}）`;
-
-    const start = (page - 1) * VPN_PAGE_SIZE;
-    const pageData = data.slice(start, start + VPN_PAGE_SIZE);
-
-    if (data.length === 0) {
-        cardList.innerHTML = '<div class="empty-tip" style="padding:30px;text-align:center;color:#999;">暂无数据</div>';
-    } else {
-        let html = '';
-        pageData.forEach(item => {
-            html += `
-            <div class="query-card" data-id="${item.id}" onclick="showVpnDetail(this)">
-                <div class="query-card-header">
-                    <span class="query-card-number">${item.name || '-'}</span>
-                    <span class="query-card-status status-none">${item.department || '-'}</span>
-                </div>
-                <div class="query-card-body">
-                    <div class="query-card-field"><label>终端类型</label><span>${item.terminal || '-'}</span></div>
-                    <div class="query-card-field"><label>VPN类型</label><span>${item.apptype || '-'}</span></div>
-                    <div class="query-card-field"><label>使用日期</label><span>${item.datetime || '-'}</span></div>
-                    <div class="query-card-field"><label>使用用途</label><span>${item.purpose || '-'}</span></div>
-                </div>
-            </div>
-            `;
-        });
-
-        if (totalPages > 1) {
-            html += `<div class="preview-pagination">`;
-            html += `<button class="preview-page-btn" data-page="1" ${page === 1 ? 'disabled' : ''}>首页</button>`;
-            html += `<button class="preview-page-btn" data-page="${page - 1}" ${page === 1 ? 'disabled' : ''}>上一页</button>`;
-            let startPage = Math.max(1, page - 2);
-            let endPage = Math.min(totalPages, startPage + 4);
-            if (endPage - startPage < 4) startPage = Math.max(1, endPage - 4);
-            for (let i = startPage; i <= endPage; i++) {
-                html += `<button class="preview-page-btn ${i === page ? 'active' : ''}" data-page="${i}">${i}</button>`;
+    const deptParam = dept === 'all' ? '' : dept;
+    const url = `/api/vpn_records?department=${encodeURIComponent(deptParam)}&page=${page}&page_size=${VPN_PAGE_SIZE}`;
+    fetch(url)
+        .then(r => r.json())
+        .then(res => {
+            if (res.status !== 'success') {
+                cardList.innerHTML = `<div style="text-align:center;color:#dc3545;padding:40px;">${escapeHtml(res.message)}</div>`;
+                return;
             }
-            html += `<button class="preview-page-btn" data-page="${page + 1}" ${page === totalPages ? 'disabled' : ''}>下一页</button>`;
-            html += `<button class="preview-page-btn" data-page="${totalPages}" ${page === totalPages ? 'disabled' : ''}>末页</button>`;
-            html += `</div>`;
-        }
 
-        cardList.innerHTML = html;
+            const data = res.data;
+            const total = res.total;
+            const totalPages = res.total_pages;
+            const label = dept === 'all' ? '全部' : dept;
+            title.textContent = `${label}（共 ${total} 条${totalPages > 1 ? `，第 ${page}/${totalPages} 页` : ''}）`;
 
-        cardList.querySelectorAll('.preview-page-btn:not([disabled])').forEach(btn => {
-            btn.addEventListener('click', () => {
-                showVpnCards(activeDepartment, parseInt(btn.dataset.page));
-            });
+            if (data.length === 0) {
+                cardList.innerHTML = '<div class="empty-tip" style="padding:30px;text-align:center;color:#999;">暂无数据</div>';
+            } else {
+                let html = '';
+                data.forEach(item => {
+                    html += `
+                    <div class="query-card" data-id="${escapeHtml(String(item.id))}" onclick="showVpnDetail(this)">
+                        <div class="query-card-header">
+                            <span class="query-card-number">${escapeHtml(item.name) || '-'}</span>
+                            <span class="query-card-status status-none">${escapeHtml(item.department) || '-'}</span>
+                        </div>
+                        <div class="query-card-body">
+                            <div class="query-card-field"><label>终端类型</label><span>${escapeHtml(item.terminal) || '-'}</span></div>
+                            <div class="query-card-field"><label>VPN类型</label><span>${escapeHtml(item.apptype) || '-'}</span></div>
+                            <div class="query-card-field"><label>使用日期</label><span>${escapeHtml(item.datetime) || '-'}</span></div>
+                            <div class="query-card-field"><label>使用用途</label><span>${escapeHtml(item.purpose) || '-'}</span></div>
+                        </div>
+                    </div>
+                    `;
+                });
+
+                if (totalPages > 1) {
+                    html += `<div class="preview-pagination">`;
+                    html += `<button class="preview-page-btn" data-page="1" ${page === 1 ? 'disabled' : ''}>首页</button>`;
+                    html += `<button class="preview-page-btn" data-page="${page - 1}" ${page === 1 ? 'disabled' : ''}>上一页</button>`;
+                    let startPage = Math.max(1, page - 2);
+                    let endPage = Math.min(totalPages, startPage + 4);
+                    if (endPage - startPage < 4) startPage = Math.max(1, endPage - 4);
+                    for (let i = startPage; i <= endPage; i++) {
+                        html += `<button class="preview-page-btn ${i === page ? 'active' : ''}" data-page="${i}">${i}</button>`;
+                    }
+                    html += `<button class="preview-page-btn" data-page="${page + 1}" ${page === totalPages ? 'disabled' : ''}>下一页</button>`;
+                    html += `<button class="preview-page-btn" data-page="${totalPages}" ${page === totalPages ? 'disabled' : ''}>末页</button>`;
+                    html += `</div>`;
+                }
+
+                cardList.innerHTML = html;
+
+                cardList.querySelectorAll('.preview-page-btn:not([disabled])').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        showVpnCards(activeDepartment, parseInt(btn.dataset.page));
+                    });
+                });
+            }
+
+            dataArea.style.display = 'block';
+        })
+        .catch(() => {
+            cardList.innerHTML = '<div style="text-align:center;color:#dc3545;padding:40px;">加载失败</div>';
         });
-    }
-
-    dataArea.style.display = 'block';
 }
 
 // ========== 新增记录 ==========
@@ -212,7 +201,7 @@ function buildVpnInsertForm() {
             <div class="form-group">
                 <label>使用部门:</label>
                 <select name="department" required>
-                    ${VPN_DEPT_OPTIONS.map(o => `<option value="${o.value}">${o.text}</option>`).join('')}
+                    ${DEPARTMENTS.map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.text)}</option>`).join('')}
                 </select>
             </div>
             <div class="form-group">
@@ -222,17 +211,17 @@ function buildVpnInsertForm() {
             <div class="form-group">
                 <label>终端类型:</label>
                 <select name="terminal">
-                    ${VPN_TERMINAL_OPTIONS.map(o => `<option value="${o.value}" ${o.value === '电脑翻墙' ? 'selected' : ''}>${o.text}</option>`).join('')}
+                    ${VPN_TERMINAL_OPTIONS.map(o => `<option value="${escapeHtml(o.value)}" ${o.value === '电脑翻墙' ? 'selected' : ''}>${escapeHtml(o.text)}</option>`).join('')}
                 </select>
             </div>
             <div class="form-group">
                 <label>使用日期:</label>
-                <input type="date" name="datetime" value="${today}" required>
+                <input type="date" name="datetime" value="${escapeHtml(today)}" required>
             </div>
             <div class="form-group">
                 <label>VPN类型:</label>
                 <select name="apptype" required>
-                    ${VPN_APPTYPE_OPTIONS.map(o => `<option value="${o.value}">${o.text}</option>`).join('')}
+                    ${VPN_APPTYPE_OPTIONS.map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.text)}</option>`).join('')}
                 </select>
             </div>
             <div class="form-group">
@@ -272,7 +261,7 @@ function bindVpnInsertSubmit() {
                     msgEl.className = 'msg-box msg-success';
                     msgEl.textContent = res.message;
                     form.reset();
-                    loadVpnData();
+                    loadVpnCounts();
                     setTimeout(() => {
                         area.style.display = 'none';
                         area.innerHTML = '';
@@ -314,7 +303,7 @@ window.showVpnDetail = function(cardEl) {
     }
 
     const body = document.getElementById('vpnDetailBody');
-    let html = `<div class="detail-form" data-id="${item.id}">`;
+    let html = `<div class="detail-form" data-id="${escapeHtml(String(item.id))}">`;
 
     html += `<div class="detail-section">
         <div class="detail-basic-grid">
@@ -322,37 +311,37 @@ window.showVpnDetail = function(cardEl) {
                 <label>使用部门:</label>
                 <span class="detail-value">
                     <select class="edit-input" name="department" disabled>
-                        ${VPN_DEPT_OPTIONS.map(o => `<option value="${o.value}" ${item.department === o.value ? 'selected' : ''}>${o.text}</option>`).join('')}
+                        ${DEPARTMENTS.map(o => `<option value="${escapeHtml(o.value)}" ${item.department === o.value ? 'selected' : ''}>${escapeHtml(o.text)}</option>`).join('')}
                     </select>
                 </span>
             </div>
             <div class="detail-basic-item">
                 <label>使用人:</label>
-                <span class="detail-value"><input type="text" class="edit-input" name="name" value="${item.name || ''}" disabled></span>
+                <span class="detail-value"><input type="text" class="edit-input" name="name" value="${escapeHtml(item.name || '')}" disabled></span>
             </div>
             <div class="detail-basic-item">
                 <label>终端类型:</label>
                 <span class="detail-value">
                     <select class="edit-input" name="terminal" disabled>
-                        ${VPN_TERMINAL_OPTIONS.map(o => `<option value="${o.value}" ${item.terminal === o.value ? 'selected' : ''}>${o.text}</option>`).join('')}
+                        ${VPN_TERMINAL_OPTIONS.map(o => `<option value="${escapeHtml(o.value)}" ${item.terminal === o.value ? 'selected' : ''}>${escapeHtml(o.text)}</option>`).join('')}
                     </select>
                 </span>
             </div>
             <div class="detail-basic-item">
                 <label>使用日期:</label>
-                <span class="detail-value"><input type="date" class="edit-input" name="datetime" value="${item.datetime || ''}" disabled></span>
+                <span class="detail-value"><input type="date" class="edit-input" name="datetime" value="${escapeHtml(item.datetime || '')}" disabled></span>
             </div>
             <div class="detail-basic-item">
                 <label>VPN类型:</label>
                 <span class="detail-value">
                     <select class="edit-input" name="apptype" disabled>
-                        ${VPN_APPTYPE_OPTIONS.map(o => `<option value="${o.value}" ${item.apptype === o.value ? 'selected' : ''}>${o.text}</option>`).join('')}
+                        ${VPN_APPTYPE_OPTIONS.map(o => `<option value="${escapeHtml(o.value)}" ${item.apptype === o.value ? 'selected' : ''}>${escapeHtml(o.text)}</option>`).join('')}
                     </select>
                 </span>
             </div>
             <div class="detail-basic-item">
                 <label>使用用途:</label>
-                <span class="detail-value"><textarea class="edit-input" name="purpose" rows="1" disabled>${item.purpose || ''}</textarea></span>
+                <span class="detail-value"><textarea class="edit-input" name="purpose" rows="1" disabled>${escapeHtml(item.purpose || '')}</textarea></span>
             </div>
         </div>
     </div>`;
@@ -402,7 +391,7 @@ function bindVpnDetailActions(id) {
                     alert(res.message);
                     if (res.status === 'success') {
                         document.getElementById('vpnDetailModal').style.display = 'none';
-                        loadVpnData();
+                        loadVpnCounts();
                     }
                 });
             }
@@ -460,7 +449,7 @@ function bindVpnDetailActions(id) {
                 alert(res.message);
                 if (res.status === 'success') {
                     document.getElementById('vpnDetailModal').style.display = 'none';
-                    loadVpnData();
+                    loadVpnCounts();
                 }
             });
         }

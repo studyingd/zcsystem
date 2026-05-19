@@ -3,9 +3,17 @@ from mysql.connector import Error
 import pandas as pd
 import io
 import uuid
+import logging
 from .config import get_db_connection, get_s3_client, S3_EXTERNAL_URL
 
 inv_bp = Blueprint('inventory', __name__)
+logger = logging.getLogger(__name__)
+
+ALLOWED_EXTENSIONS = {'jpg', 'jpeg', 'png', 'gif', 'pdf', 'doc', 'docx', 'xls', 'xlsx', 'zip', 'rar'}
+
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[-1].lower() in ALLOWED_EXTENSIONS
 
 
 # 上传附件
@@ -18,8 +26,11 @@ def upload_attachment():
     if not file or file.filename == '':
         return jsonify({'status': 'error', 'message': '请选择文件'}), 400
 
-    ext = file.filename.rsplit('.', 1)[-1] if '.' in file.filename else ''
-    filename = f"{uuid.uuid4().hex}.{ext}" if ext else uuid.uuid4().hex
+    if not allowed_file(file.filename):
+        return jsonify({'status': 'error', 'message': '不支持的文件类型'}), 400
+
+    ext = file.filename.rsplit('.', 1)[-1].lower()
+    filename = f"{uuid.uuid4().hex}.{ext}"
 
     try:
         s3 = get_s3_client()
@@ -27,7 +38,8 @@ def upload_attachment():
         url = f"{S3_EXTERNAL_URL}/zcsystem/{filename}"
         return jsonify({'status': 'success', 'url': url, 'filename': filename})
     except Exception as e:
-        return jsonify({'status': 'error', 'message': f'上传失败: {str(e)}'}), 500
+        logger.error("上传失败: %s", e)
+        return jsonify({'status': 'error', 'message': '服务器内部错误'}), 500
 
 
 # 插入记录
@@ -48,7 +60,7 @@ def insert_record():
     if not all([number, department, site, type_val, date_val, status_val]):
         return jsonify({'status': 'error', 'message': '资产编码、使用部门、使用人、资产类型、发放日期 和 资产状态 均不能为空'}), 400
 
-    valid_statuses = {'已录入', '未录入', '无需录入', '租聘', '借用', '入库'}
+    valid_statuses = {'已录入', '未录入', '无需录入', '租聘', '借用', '入库', '报废'}
     if status_val not in valid_statuses:
         return jsonify({'status': 'error', 'message': '资产状态 值不合法'}), 400
 
@@ -68,10 +80,37 @@ def insert_record():
         return jsonify({'status': 'success', 'message': '插入成功'})
     except Error as e:
         conn.rollback()
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        logger.error("插入记录失败: %s", e)
+        return jsonify({'status': 'error', 'message': '服务器内部错误'}), 500
     finally:
         cursor.close()
         conn.close()
+
+
+INVENTORY_COLS = "id, number, department, site, type, DATE_FORMAT(datetime, '%Y-%m-%d') as datetime, status, tag, notice"
+INVENTORY_TMP_COLS = "tmp_id, " + INVENTORY_COLS
+
+_DEVICE_LIST_COLS = "id, number, spec, type, department, name, sn, cpu, mem, disk, gpu"
+
+
+def _fallback_device_list(cursor, column, value):
+    """查 device_list 作为回退，返回格式化后的数据或 None"""
+    if column == 'number':
+        col, op, val = 'number', 'LIKE', f'%{value}%'
+    elif column == 'site':
+        col, op, val = 'name', 'LIKE', f'%{value}%'
+    elif column == 'sn':
+        col, op, val = 'sn', 'LIKE', f'%{value}%'
+    else:
+        return None
+    cursor.execute(f"SELECT {_DEVICE_LIST_COLS} FROM device_list WHERE {col} {op} %s", (val,))
+    rows = cursor.fetchall()
+    if rows:
+        for item in rows:
+            item['source'] = 'device_list'
+            item['datetime'] = ''
+            item['site'] = item.get('name', '')
+    return rows or None
 
 
 # 查询记录（支持 id, number, department, site）
@@ -98,71 +137,35 @@ def query_record():
 
         cursor = conn.cursor(dictionary=True)
         try:
+            cols = INVENTORY_TMP_COLS if table_name == 'inventory_tmp' else INVENTORY_COLS
+
             if mode == 'id':
                 if not value.isdigit():
                     return jsonify({'status': 'error', 'message': 'ID必须为数字'}), 400
-                if table_name == 'inventory_tmp':
-                    sql = f"SELECT tmp_id, id, number, department, site, type, DATE_FORMAT(datetime, '%Y-%m-%d') as datetime, status, tag, notice FROM {table_name} WHERE id = %s"
-                else:
-                    sql = f"SELECT id, number, department, site, type, DATE_FORMAT(datetime, '%Y-%m-%d') as datetime, status, tag, notice FROM {table_name} WHERE id = %s"
-                cursor.execute(sql, (value,))
-            elif mode == 'number':
-                if table_name == 'inventory_tmp':
-                    sql = f"SELECT tmp_id, id, number, department, site, type, DATE_FORMAT(datetime, '%Y-%m-%d') as datetime, status, tag, notice FROM {table_name} WHERE number LIKE %s"
-                else:
-                    sql = f"SELECT id, number, department, site, type, DATE_FORMAT(datetime, '%Y-%m-%d') as datetime, status, tag, notice FROM {table_name} WHERE number LIKE %s"
-                cursor.execute(sql, (f'%{value}%',))
-            elif mode == 'department':
-                if table_name == 'inventory_tmp':
-                    sql = f"SELECT tmp_id, id, number, department, site, type, DATE_FORMAT(datetime, '%Y-%m-%d') as datetime, status, tag, notice FROM {table_name} WHERE department = %s"
-                else:
-                    sql = f"SELECT id, number, department, site, type, DATE_FORMAT(datetime, '%Y-%m-%d') as datetime, status, tag, notice FROM {table_name} WHERE department = %s"
-                cursor.execute(sql, (value,))
-            elif mode == 'site':
-                if table_name == 'inventory_tmp':
-                    sql = f"SELECT tmp_id, id, number, department, site, type, DATE_FORMAT(datetime, '%Y-%m-%d') as datetime, status, tag, notice FROM {table_name} WHERE site LIKE %s"
-                else:
-                    sql = f"SELECT id, number, department, site, type, DATE_FORMAT(datetime, '%Y-%m-%d') as datetime, status, tag, notice FROM {table_name} WHERE site LIKE %s"
-                cursor.execute(sql, (f'%{value}%',))
+                cursor.execute(f"SELECT {cols} FROM {table_name} WHERE id = %s", (value,))
             elif mode == 'sn':
                 cursor.execute("SELECT number FROM device_list WHERE sn LIKE %s", (f'%{value}%',))
                 sn_rows = cursor.fetchall()
                 if sn_rows:
                     numbers = [r['number'] for r in sn_rows]
                     placeholders = ','.join(['%s'] * len(numbers))
-                    if table_name == 'inventory_tmp':
-                        sql = f"SELECT tmp_id, id, number, department, site, type, DATE_FORMAT(datetime, '%Y-%m-%d') as datetime, status, tag, notice FROM {table_name} WHERE number IN ({placeholders})"
-                    else:
-                        sql = f"SELECT id, number, department, site, type, DATE_FORMAT(datetime, '%Y-%m-%d') as datetime, status, tag, notice FROM {table_name} WHERE number IN ({placeholders})"
-                    cursor.execute(sql, tuple(numbers))
+                    cursor.execute(f"SELECT {cols} FROM {table_name} WHERE number IN ({placeholders})", tuple(numbers))
                 else:
                     cursor.execute("SELECT 1 WHERE 0")
+            else:
+                where_map = {
+                    'number': ("number LIKE %s", f'%{value}%'),
+                    'department': ("department = %s", value),
+                    'site': ("site LIKE %s", f'%{value}%'),
+                }
+                clause, param = where_map[mode]
+                cursor.execute(f"SELECT {cols} FROM {table_name} WHERE {clause}", (param,))
 
             data = cursor.fetchall()
             if not data:
-                if mode == 'number' and table == 'main':
-                    cursor.execute(
-                        "SELECT id, number, spec, type, department, name, sn, cpu, mem, disk, gpu FROM device_list WHERE number LIKE %s",
-                        (f'%{value}%',)
-                    )
-                    device_data = cursor.fetchall()
+                if table == 'main' and mode in ('number', 'site', 'sn'):
+                    device_data = _fallback_device_list(cursor, mode, value)
                     if device_data:
-                        for item in device_data:
-                            item['source'] = 'device_list'
-                            item['datetime'] = ''
-                            item['site'] = item.get('name', '')
-                        return jsonify({'status': 'success', 'data': device_data}), 200
-                elif mode == 'sn' and table == 'main':
-                    cursor.execute(
-                        "SELECT id, number, spec, type, department, name, sn, cpu, mem, disk, gpu FROM device_list WHERE sn LIKE %s",
-                        (f'%{value}%',)
-                    )
-                    device_data = cursor.fetchall()
-                    if device_data:
-                        for item in device_data:
-                            item['source'] = 'device_list'
-                            item['datetime'] = ''
-                            item['site'] = item.get('name', '')
                         return jsonify({'status': 'success', 'data': device_data}), 200
                 return jsonify({'status': 'not_found', 'message': f'未找到{table_name}表中符合条件的记录'}), 200
 
@@ -173,14 +176,15 @@ def query_record():
             return jsonify({'status': 'success', 'data': data}), 200
 
         except Exception as e:
-            print(f"查询异常：{str(e)}")
-            return jsonify({'status': 'error', 'message': f'查询失败：{str(e)}'}), 500
+            logger.error("查询异常: %s", e)
+            return jsonify({'status': 'error', 'message': '服务器内部错误'}), 500
         finally:
             cursor.close()
             conn.close()
 
     except Exception as e:
-        return jsonify({'status': 'error', 'message': f'服务器异常：{str(e)}'}), 500
+        logger.error("服务器异常: %s", e)
+        return jsonify({'status': 'error', 'message': '服务器内部错误'}), 500
 
 
 # 删除记录（通过id）
@@ -214,7 +218,8 @@ def delete_record():
     except Exception as e:
         if conn:
             conn.rollback()
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        logger.error("删除记录失败: %s", e)
+        return jsonify({'status': 'error', 'message': '服务器内部错误'}), 500
     finally:
         if cursor:
             cursor.close()
@@ -252,7 +257,8 @@ def delete_history():
     except Exception as e:
         if conn:
             conn.rollback()
-        return jsonify({'status': 'error', 'message': f'删除失败：{str(e)}'}), 500
+        logger.error("删除历史记录失败: %s", e)
+        return jsonify({'status': 'error', 'message': '服务器内部错误'}), 500
     finally:
         if cursor:
             cursor.close()
@@ -278,7 +284,8 @@ def list_all_records():
                 r['datetime'] = r['datetime'].strftime('%Y-%m-%d')
         return jsonify({'status': 'success', 'data': records})
     except Error as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        logger.error("查询所有记录失败: %s", e)
+        return jsonify({'status': 'error', 'message': '服务器内部错误'}), 500
     finally:
         cursor.close()
         conn.close()
@@ -312,7 +319,8 @@ def export_excel():
             download_name=filename
         )
     except Exception as e:
-        return f"导出失败: {str(e)}", 500
+        logger.error("导出Excel失败: %s", e)
+        return "导出失败: 服务器内部错误", 500
     finally:
         conn.close()
 
@@ -336,7 +344,7 @@ def update_record():
     if not all([id_val, number, department, site, type_val, date_val, status_val]):
         return jsonify({'status': 'error', 'message': 'ID、资产编码、使用部门、使用人、资产类型、发放日期 和 资产状态 均不能为空'}), 400
 
-    valid_statuses = {'已录入', '未录入', '无需录入', '租聘', '借用', '入库'}
+    valid_statuses = {'已录入', '未录入', '无需录入', '租聘', '借用', '入库', '报废'}
     if status_val not in valid_statuses:
         return jsonify({'status': 'error', 'message': '资产状态 值不合法'}), 400
 
@@ -433,7 +441,8 @@ def update_record():
 
     except Error as e:
         conn.rollback()
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        logger.error("更新记录失败: %s", e)
+        return jsonify({'status': 'error', 'message': '服务器内部错误'}), 500
     finally:
         cursor.close()
         conn.close()
@@ -471,7 +480,8 @@ def sync_to_device_list():
         return jsonify({'status': 'success', 'message': '同步成功'})
 
     except Error as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        logger.error("同步到device_list失败: %s", e)
+        return jsonify({'status': 'error', 'message': '服务器内部错误'}), 500
     finally:
         cursor.close()
         conn.close()
@@ -495,7 +505,7 @@ def update_history_record():
     if not all([tmp_id, number, department, site, type_val, date_val, status_val]):
         return jsonify({'status': 'error', 'message': '历史记录ID、资产编码、使用部门、使用人、资产类型、发放日期 和 资产状态 均不能为空'}), 400
 
-    valid_statuses = {'已录入', '未录入', '无需录入', '租聘', '借用', '入库'}
+    valid_statuses = {'已录入', '未录入', '无需录入', '租聘', '借用', '入库', '报废'}
     if status_val not in valid_statuses:
         return jsonify({'status': 'error', 'message': '资产状态 值不合法'}), 400
 
@@ -535,7 +545,8 @@ def update_history_record():
 
     except Error as e:
         conn.rollback()
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        logger.error("更新历史记录失败: %s", e)
+        return jsonify({'status': 'error', 'message': '服务器内部错误'}), 500
     finally:
         cursor.close()
         conn.close()
@@ -549,8 +560,8 @@ def asset_full_detail():
 
     number = request.args.get('number')
     record_id = request.args.get('id')
-    if not number:
-        return jsonify({'status': 'error', 'message': '资产编码不能为空'}), 400
+    if not number and not record_id:
+        return jsonify({'status': 'error', 'message': '资产编码和ID不能同时为空'}), 400
 
     conn = get_db_connection()
     if not conn:
@@ -575,40 +586,49 @@ def asset_full_detail():
             inv['source'] = 'inventory'
             inv['datetime'] = inv.get('datetime', '') or ''
             result['basic'] = inv
+            if not number:
+                number = inv.get('number', '')
 
-        cursor.execute(
-            "SELECT id, number, spec, type, department, name, sn, cpu, mem, disk, gpu FROM device_list WHERE number = %s",
-            (number,)
-        )
-        dev = cursor.fetchone()
-        if dev:
-            result['hardware'] = {
-                'spec': dev.get('spec', ''),
-                'sn': dev.get('sn', ''),
-                'cpu': dev.get('cpu', ''),
-                'mem': dev.get('mem', ''),
-                'disk': dev.get('disk', ''),
-                'gpu': dev.get('gpu', ''),
-                'type': dev.get('type', '')
-            }
-            if not result['basic']:
-                result['basic'] = {
-                    'id': dev.get('id', ''),
-                    'number': dev.get('number', ''),
-                    'department': dev.get('department', ''),
-                    'site': dev.get('name', ''),
-                    'type': dev.get('type', ''),
-                    'datetime': '',
-                    'status': '',
-                    'tag': '',
-                    'notice': '',
-                    'source': 'device_list'
+        if number:
+            cursor.execute(
+                "SELECT id, number, spec, type, department, name, sn, cpu, mem, disk, gpu FROM device_list WHERE number = %s",
+                (number,)
+            )
+            dev = cursor.fetchone()
+            if dev:
+                result['hardware'] = {
+                    'spec': dev.get('spec', ''),
+                    'sn': dev.get('sn', ''),
+                    'cpu': dev.get('cpu', ''),
+                    'mem': dev.get('mem', ''),
+                    'disk': dev.get('disk', ''),
+                    'gpu': dev.get('gpu', ''),
+                    'type': dev.get('type', '')
                 }
+                if not result['basic']:
+                    result['basic'] = {
+                        'id': dev.get('id', ''),
+                        'number': dev.get('number', ''),
+                        'department': dev.get('department', ''),
+                        'site': dev.get('name', ''),
+                        'type': dev.get('type', ''),
+                        'datetime': '',
+                        'status': '',
+                        'tag': '',
+                        'notice': '',
+                        'source': 'device_list'
+                    }
 
-        cursor.execute(
-            "SELECT tmp_id, id, number, department, site, type, DATE_FORMAT(datetime, '%Y-%m-%d') as datetime, status, tag, notice FROM inventory_tmp WHERE number = %s ORDER BY datetime DESC",
-            (number,)
-        )
+        if record_id and record_id.isdigit():
+            cursor.execute(
+                "SELECT tmp_id, id, number, department, site, type, DATE_FORMAT(datetime, '%Y-%m-%d') as datetime, status, tag, notice FROM inventory_tmp WHERE id = %s ORDER BY datetime DESC",
+                (record_id,)
+            )
+        elif number:
+            cursor.execute(
+                "SELECT tmp_id, id, number, department, site, type, DATE_FORMAT(datetime, '%Y-%m-%d') as datetime, status, tag, notice FROM inventory_tmp WHERE number = %s ORDER BY datetime DESC",
+                (number,)
+            )
         history = cursor.fetchall()
         for h in history:
             h['datetime'] = h.get('datetime', '') or ''
@@ -620,15 +640,16 @@ def asset_full_detail():
         return jsonify({'status': 'success', 'data': result})
 
     except Exception as e:
-        return jsonify({'status': 'error', 'message': f'查询失败：{str(e)}'}), 500
+        logger.error("资产详情查询失败: %s", e)
+        return jsonify({'status': 'error', 'message': '服务器内部错误'}), 500
     finally:
         cursor.close()
         conn.close()
 
 
-# 按状态分类查询数据
-@inv_bp.route('/list_by_status', methods=['GET'])
-def list_by_status():
+# 按状态分类统计数量
+@inv_bp.route('/status_counts', methods=['GET'])
+def status_counts():
     if not session.get('logged_in'):
         return jsonify({'status': 'error', 'message': '未登录，请先登录'}), 401
     conn = get_db_connection()
@@ -637,32 +658,86 @@ def list_by_status():
 
     cursor = conn.cursor(dictionary=True)
     try:
-        cursor.execute("SELECT id, number, department, site, type, datetime, status, tag, notice FROM inventory ORDER BY id ASC")
+        cursor.execute("SELECT status, COUNT(*) as cnt FROM inventory GROUP BY status")
+        rows = cursor.fetchall()
+        counts = {}
+        total = 0
+        for r in rows:
+            status_val = r['status'].strip() if r['status'] and r['status'].strip() else '无状态'
+            if status_val not in ('已录入', '未录入', '租聘', '借用', '入库', '无需录入', '报废'):
+                status_val = '无状态'
+            counts[status_val] = counts.get(status_val, 0) + r['cnt']
+            total += r['cnt']
+        return jsonify({'status': 'success', 'counts': counts, 'total': total})
+    except Error as e:
+        logger.error("状态统计失败: %s", e)
+        return jsonify({'status': 'error', 'message': '服务器内部错误'}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# 按状态分页查询
+@inv_bp.route('/list_by_status', methods=['GET'])
+def list_by_status():
+    if not session.get('logged_in'):
+        return jsonify({'status': 'error', 'message': '未登录，请先登录'}), 401
+
+    status_val = request.args.get('status', 'all').strip()
+    page = request.args.get('page', '1')
+    page_size = request.args.get('page_size', '20')
+
+    try:
+        page = max(1, int(page))
+        page_size = max(1, min(100, int(page_size)))
+    except ValueError:
+        return jsonify({'status': 'error', 'message': '分页参数错误'}), 400
+
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'status': 'error', 'message': '数据库连接失败'}), 500
+
+    cursor = conn.cursor(dictionary=True)
+    try:
+        valid_statuses = ('已录入', '未录入', '租聘', '借用', '入库', '无需录入', '报废')
+
+        if status_val == 'all':
+            where = ''
+            params = []
+        elif status_val in valid_statuses:
+            where = 'WHERE status = %s'
+            params = [status_val]
+        else:
+            where = "WHERE (status IS NULL OR status = '' OR status NOT IN (%s))" % ','.join(['%s'] * len(valid_statuses))
+            params = list(valid_statuses)
+
+        # 总数
+        cursor.execute(f"SELECT COUNT(*) as total FROM inventory {where}", params)
+        total = cursor.fetchone()['total']
+
+        # 分页数据
+        offset = (page - 1) * page_size
+        cursor.execute(
+            f"SELECT id, number, department, site, type, DATE_FORMAT(datetime, '%Y-%m-%d') as datetime, status, tag, notice "
+            f"FROM inventory {where} ORDER BY id ASC LIMIT %s OFFSET %s",
+            params + [page_size, offset]
+        )
         records = cursor.fetchall()
 
-        status_groups = {
-            '已录入': [],
-            '未录入': [],
-            '租聘': [],
-            '借用': [],
-            '入库': [],
-            '无需录入': [],
-            '无状态': []
-        }
-
         for r in records:
-            if r['datetime']:
-                r['datetime'] = r['datetime'].strftime('%Y-%m-%d')
+            r['datetime'] = r.get('datetime', '') or ''
 
-            status_val = r['status'].strip() if r['status'] and r['status'].strip() else '无状态'
-            if status_val in status_groups:
-                status_groups[status_val].append(r)
-            else:
-                status_groups['无状态'].append(r)
-
-        return jsonify({'status': 'success', 'data': status_groups})
+        return jsonify({
+            'status': 'success',
+            'data': records,
+            'total': total,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': max(1, -(-total // page_size))
+        })
     except Error as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        logger.error("按状态查询失败: %s", e)
+        return jsonify({'status': 'error', 'message': '服务器内部错误'}), 500
     finally:
         cursor.close()
         conn.close()

@@ -1,16 +1,18 @@
+import logging
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for, session
 from datetime import datetime, date
 from mysql.connector import Error
 from .config import get_db_connection
 
 asset_bp = Blueprint('asset', __name__)
+logger = logging.getLogger(__name__)
 
 # 资产登记页面
 @asset_bp.route('/asset_register')
 def asset_register():
     if not session.get('logged_in'):
         return redirect(url_for('auth.login'))
-    return render_template('asset_register.html')
+    return render_template('asset_register.html', active_nav='asset_register')
 
 # 生成资产编码（预览用）
 @asset_bp.route('/api/generate_asset_codes', methods=['POST'])
@@ -40,6 +42,7 @@ def generate_asset_codes():
     # 查询同月最大序号
     conn = get_db_connection()
     next_seq = 1
+    cursor = None
     if conn:
         try:
             cursor = conn.cursor()
@@ -53,9 +56,10 @@ def generate_asset_codes():
                 last_seq = int(last_code[-3:])
                 next_seq = last_seq + 1
         except Error as e:
-            print(f"查询最大序号错误: {e}")
+            logger.error("查询最大序号错误: %s", e)
         finally:
-            cursor.close()
+            if cursor:
+                cursor.close()
             conn.close()
 
     # 生成编码列表
@@ -105,6 +109,7 @@ def batch_create_assets():
         return jsonify({'status': 'error', 'message': '数据库连接失败'}), 500
 
     next_seq = 1
+    cursor = None
     try:
         cursor = conn.cursor()
         cursor.execute(
@@ -156,9 +161,11 @@ def batch_create_assets():
         })
     except Error as e:
         conn.rollback()
-        return jsonify({'status': 'error', 'message': f'登记失败: {str(e)}'}), 500
+        logger.error("登记失败: %s", e)
+        return jsonify({'status': 'error', 'message': '服务器内部错误'}), 500
     finally:
-        cursor.close()
+        if cursor:
+            cursor.close()
         conn.close()
 
 # 获取所有资产列表（按月份分组）
@@ -213,7 +220,7 @@ def get_all_assets():
             'current_month': month
         })
     except Error as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': '服务器内部错误'}), 500
     finally:
         cursor.close()
         conn.close()
@@ -254,7 +261,7 @@ def get_asset_detail():
 
         return jsonify({'status': 'success', 'data': asset})
     except Error as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': '服务器内部错误'}), 500
     finally:
         cursor.close()
         conn.close()

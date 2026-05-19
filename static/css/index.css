@@ -740,8 +740,8 @@ textarea.edit-input {
 }
 
 .detail-action-btn.btn-cancel:hover {
-    background: #dc3545;
-    color: #fff;
+    background: #f0f2f5 !important;
+    color: #495057 !important;
 }
 
 /* 详情弹窗 - 区块样式 */

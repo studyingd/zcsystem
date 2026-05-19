@@ -1,23 +1,24 @@
-let statusData = {};
+let statusCounts = {};
+let statusTotal = 0;
 let activeOverviewStatus = null;
 let previewCurrentPage = 1;
 const PAGE_SIZE = 20;
 window.addEventListener('DOMContentLoaded', () => {
-    loadStatusData();
+    loadStatusCounts();
     bindQueryBtn();
 });
 
-function loadStatusData() {
-    fetch('/list_by_status')
+function loadStatusCounts() {
+    fetch('/status_counts')
         .then(response => {
             if (!response.ok) throw new Error('网络请求失败');
             return response.json();
         })
         .then(res => {
             if (res.status === 'success') {
-                statusData = res.data;
+                statusCounts = res.counts;
+                statusTotal = res.total;
                 renderOverviewCards();
-                // 如果之前选中了某个状态，恢复显示
                 if (activeOverviewStatus) {
                     const card = document.querySelector(`.overview-card[data-status="${activeOverviewStatus}"]`);
                     if (card) {
@@ -25,7 +26,6 @@ function loadStatusData() {
                         showPreviewCards(activeOverviewStatus);
                     }
                 } else {
-                    // 默认展示未录入状态
                     activeOverviewStatus = '未录入';
                     const card = document.querySelector(`.overview-card[data-status="未录入"]`);
                     if (card) {
@@ -42,11 +42,8 @@ function loadStatusData() {
 
 function renderOverviewCards() {
     const container = document.getElementById('overviewCards');
-    // 计算总数
-    let total = 0;
-    Object.values(statusData).forEach(group => total += group.length);
 
-    const statusOrder = ['已录入', '未录入', '租聘', '借用', '入库', '无需录入', '无状态'];
+    const statusOrder = ['已录入', '未录入', '租聘', '借用', '入库', '无需录入', '报废', '无状态'];
     const statusColors = {
         '已录入': '#28a745',
         '未录入': '#ffc107',
@@ -54,22 +51,23 @@ function renderOverviewCards() {
         '借用': '#6610f2',
         '入库': '#fd7e14',
         '无需录入': '#6c757d',
+        '报废': '#dc3545',
         '无状态': '#adb5bd'
     };
 
     let html = `
         <div class="overview-card" data-status="all">
-            <div class="overview-card-count" style="color:#007bff;">${total}</div>
+            <div class="overview-card-count" style="color:#007bff;">${statusTotal}</div>
             <div class="overview-card-label">全部</div>
         </div>
     `;
     statusOrder.forEach(status => {
-        const count = (statusData[status] || []).length;
+        const count = statusCounts[status] || 0;
         const color = statusColors[status] || '#6c757d';
         html += `
-            <div class="overview-card" data-status="${status}">
+            <div class="overview-card" data-status="${escapeHtml(status)}">
                 <div class="overview-card-count" style="color:${color};">${count}</div>
-                <div class="overview-card-label">${status}</div>
+                <div class="overview-card-label">${escapeHtml(status)}</div>
             </div>
         `;
     });
@@ -105,71 +103,76 @@ function showPreviewCards(status, page) {
     const cardList = document.getElementById('previewCardList');
     const title = document.getElementById('previewTitle');
 
-    let data = [];
-    if (status === 'all') {
-        Object.values(statusData).forEach(group => data = [...data, ...group]);
-    } else {
-        data = statusData[status] || [];
-    }
+    cardList.innerHTML = '<div style="text-align:center;color:#999;padding:40px;">加载中...</div>';
 
-    const totalPages = Math.ceil(data.length / PAGE_SIZE);
-    const label = status === 'all' ? '全部' : status;
-    title.textContent = `${label}（共 ${data.length} 条${totalPages > 1 ? `，第 ${page}/${totalPages} 页` : ''}）`;
-
-    // 分页截取
-    const start = (page - 1) * PAGE_SIZE;
-    const pageData = data.slice(start, start + PAGE_SIZE);
-
-    if (data.length === 0) {
-        cardList.innerHTML = '<div class="empty-tip" style="padding:30px;text-align:center;color:#999;">暂无数据</div>';
-    } else {
-        let html = '';
-        pageData.forEach(item => {
-            const statusClass = getStatusClass(item.status);
-            html += `
-            <div class="query-card" data-id="${item.id}" data-source="${item.source || 'inventory'}" onclick="showQueryDetail(this)">
-                <div class="query-card-header">
-                    <span class="query-card-number">${item.number || '-'}</span>
-                    <span class="query-card-status ${statusClass}">${item.status || '无状态'}</span>
-                </div>
-                <div class="query-card-body">
-                    <div class="query-card-field"><label>使用部门</label><span>${item.department || '-'}</span></div>
-                    <div class="query-card-field"><label>使用人</label><span>${item.site || '-'}</span></div>
-                    <div class="query-card-field"><label>资产类型</label><span>${item.type || '-'}</span></div>
-                    <div class="query-card-field"><label>发放日期</label><span>${item.datetime || '-'}</span></div>
-                </div>
-            </div>
-            `;
-        });
-
-        // 分页控件
-        if (totalPages > 1) {
-            html += `<div class="preview-pagination">`;
-            html += `<button class="preview-page-btn" data-page="1" ${page === 1 ? 'disabled' : ''}>首页</button>`;
-            html += `<button class="preview-page-btn" data-page="${page - 1}" ${page === 1 ? 'disabled' : ''}>上一页</button>`;
-            // 页码按钮（最多显示5个）
-            let startPage = Math.max(1, page - 2);
-            let endPage = Math.min(totalPages, startPage + 4);
-            if (endPage - startPage < 4) startPage = Math.max(1, endPage - 4);
-            for (let i = startPage; i <= endPage; i++) {
-                html += `<button class="preview-page-btn ${i === page ? 'active' : ''}" data-page="${i}">${i}</button>`;
+    const url = `/list_by_status?status=${encodeURIComponent(status)}&page=${page}&page_size=${PAGE_SIZE}`;
+    fetch(url)
+        .then(r => r.json())
+        .then(res => {
+            if (res.status !== 'success') {
+                cardList.innerHTML = `<div style="text-align:center;color:#dc3545;padding:40px;">${escapeHtml(res.message)}</div>`;
+                return;
             }
-            html += `<button class="preview-page-btn" data-page="${page + 1}" ${page === totalPages ? 'disabled' : ''}>下一页</button>`;
-            html += `<button class="preview-page-btn" data-page="${totalPages}" ${page === totalPages ? 'disabled' : ''}>末页</button>`;
-            html += `</div>`;
-        }
 
-        cardList.innerHTML = html;
+            const data = res.data;
+            const total = res.total;
+            const totalPages = res.total_pages;
+            const label = status === 'all' ? '全部' : status;
+            title.textContent = `${label}（共 ${total} 条${totalPages > 1 ? `，第 ${page}/${totalPages} 页` : ''}）`;
 
-        // 绑定分页按钮事件
-        cardList.querySelectorAll('.preview-page-btn:not([disabled])').forEach(btn => {
-            btn.addEventListener('click', () => {
-                showPreviewCards(activeOverviewStatus, parseInt(btn.dataset.page));
-            });
+            if (data.length === 0) {
+                cardList.innerHTML = '<div class="empty-tip" style="padding:30px;text-align:center;color:#999;">暂无数据</div>';
+            } else {
+                let html = '';
+                data.forEach(item => {
+                    const statusClass = getStatusClass(item.status);
+                    html += `
+                    <div class="query-card" data-id="${escapeHtml(item.id)}" data-number="${escapeHtml(item.number || '')}" data-source="${escapeHtml(item.source || 'inventory')}" onclick="showQueryDetail(this)">
+                        <div class="query-card-header">
+                            <span class="query-card-number">${escapeHtml(item.number) || '-'}</span>
+                            <span class="query-card-status ${statusClass}">${escapeHtml(item.status) || '无状态'}</span>
+                        </div>
+                        <div class="query-card-body">
+                            <div class="query-card-field"><label>使用部门</label><span>${escapeHtml(item.department) || '-'}</span></div>
+                            <div class="query-card-field"><label>使用人</label><span>${escapeHtml(item.site) || '-'}</span></div>
+                            <div class="query-card-field"><label>资产类型</label><span>${escapeHtml(item.type) || '-'}</span></div>
+                            <div class="query-card-field"><label>发放日期</label><span>${escapeHtml(item.datetime) || '-'}</span></div>
+                        </div>
+                    </div>
+                    `;
+                });
+
+                // 分页控件
+                if (totalPages > 1) {
+                    html += `<div class="preview-pagination">`;
+                    html += `<button class="preview-page-btn" data-page="1" ${page === 1 ? 'disabled' : ''}>首页</button>`;
+                    html += `<button class="preview-page-btn" data-page="${page - 1}" ${page === 1 ? 'disabled' : ''}>上一页</button>`;
+                    let startPage = Math.max(1, page - 2);
+                    let endPage = Math.min(totalPages, startPage + 4);
+                    if (endPage - startPage < 4) startPage = Math.max(1, endPage - 4);
+                    for (let i = startPage; i <= endPage; i++) {
+                        html += `<button class="preview-page-btn ${i === page ? 'active' : ''}" data-page="${i}">${i}</button>`;
+                    }
+                    html += `<button class="preview-page-btn" data-page="${page + 1}" ${page === totalPages ? 'disabled' : ''}>下一页</button>`;
+                    html += `<button class="preview-page-btn" data-page="${totalPages}" ${page === totalPages ? 'disabled' : ''}>末页</button>`;
+                    html += `</div>`;
+                }
+
+                cardList.innerHTML = html;
+
+                // 绑定分页按钮事件
+                cardList.querySelectorAll('.preview-page-btn:not([disabled])').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        showPreviewCards(activeOverviewStatus, parseInt(btn.dataset.page));
+                    });
+                });
+            }
+
+            dataArea.style.display = 'block';
+        })
+        .catch(() => {
+            cardList.innerHTML = '<div style="text-align:center;color:#dc3545;padding:40px;">加载失败</div>';
         });
-    }
-
-    dataArea.style.display = 'block';
 }
 
 function bindQueryBtn() {
@@ -211,15 +214,15 @@ function bindQueryBtn() {
                         const rowId = isTmpData ? item.tmp_id : item.id;
                         const source = item.source || 'inventory';
                         html += `
-                        <div class="query-card" data-id="${rowId}" data-table="${isTmpData ? 'tmp' : 'main'}" data-source="${source}" onclick="showQueryDetail(this)">
+                        <div class="query-card" data-id="${escapeHtml(rowId)}" data-number="${escapeHtml(item.number || '')}" data-table="${isTmpData ? 'tmp' : 'main'}" data-source="${escapeHtml(source)}" onclick="showQueryDetail(this)">
                             <div class="query-card-header">
-                                <span class="query-card-number">${item.number || '-'}</span>
-                                <span class="query-card-status ${getStatusClass(item.status)}">${item.status || '无状态'}</span>
+                                <span class="query-card-number">${escapeHtml(item.number) || '-'}</span>
+                                <span class="query-card-status ${getStatusClass(item.status)}">${escapeHtml(item.status) || '无状态'}</span>
                             </div>
                             <div class="query-card-body">
-                                <div class="query-card-field"><label>使用部门</label><span>${item.department || '-'}</span></div>
-                                <div class="query-card-field"><label>使用人</label><span>${item.site || '-'}</span></div>
-                                <div class="query-card-field"><label>资产类型</label><span>${item.type || '-'}</span></div>
+                                <div class="query-card-field"><label>使用部门</label><span>${escapeHtml(item.department) || '-'}</span></div>
+                                <div class="query-card-field"><label>使用人</label><span>${escapeHtml(item.site) || '-'}</span></div>
+                                <div class="query-card-field"><label>资产类型</label><span>${escapeHtml(item.type) || '-'}</span></div>
                             </div>
                         </div>
                         `;
@@ -228,14 +231,14 @@ function bindQueryBtn() {
                     queryResult.innerHTML = html;
                 } else if (res.status === 'not_found') {
                     const hint = getNotFoundHint(mode, value);
-                    queryResult.innerHTML = `<div class="msg-box msg-warning">${hint}</div>`;
+                    queryResult.innerHTML = `<div class="msg-box msg-warning">${escapeHtml(hint)}</div>`;
                 } else {
-                    showQueryResult('查询失败：' + res.message, 'error');
+                    showQueryResult('查询失败：' + escapeHtml(res.message), 'error');
                 }
             })
             .catch(error => {
                 console.error('查询请求错误：', error);
-                showQueryResult(`查询失败：${error.message}`, 'error');
+                showQueryResult(`查询失败：${escapeHtml(error.message)}`, 'error');
             });
     }
 
@@ -277,7 +280,7 @@ function bindQueryBtn() {
     });
 
     function showQueryResult(text, type) {
-        queryResult.innerHTML = `<div class="msg-box msg-${type}">${text}</div>`;
+        queryResult.innerHTML = `<div class="msg-box msg-${type}">${escapeHtml(text)}</div>`;
     }
 
     function getNotFoundHint(mode, value) {
@@ -322,7 +325,7 @@ function bindQueryBtn() {
             {value: '无需录入', text: '无需录入'}
         ];
 
-        let deptSelectHTML = '<select id="prefill_department" name="department" required>' + DEPT_OPTIONS.map(o =>
+        let deptSelectHTML = '<select id="prefill_department" name="department" required>' + DEPARTMENTS.map(o =>
             `<option value="${o.value}" ${prefillDept === o.value ? 'selected' : ''}>${o.text}</option>`
         ).join('') + '</select>';
 
@@ -353,7 +356,7 @@ function bindQueryBtn() {
             <form id="prefillInsertForm" class="prefill-form">
                 <div class="form-group">
                     <label>资产编码:</label>
-                    <input type="text" id="prefill_number" name="number" value="${prefillNumber}" required placeholder="请输入资产编码">
+                    <input type="text" id="prefill_number" name="number" value="${escapeHtml(prefillNumber)}" required placeholder="请输入资产编码">
                 </div>
                 <div class="form-group">
                     <label>资产类型:</label>
@@ -366,7 +369,7 @@ function bindQueryBtn() {
                 </div>
                 <div class="form-group">
                     <label>使用人:</label>
-                    <input type="text" id="prefill_site" name="site" value="${prefillSite}" required placeholder="请输入使用人">
+                    <input type="text" id="prefill_site" name="site" value="${escapeHtml(prefillSite)}" required placeholder="请输入使用人">
                 </div>
                 <div class="form-group">
                     <label>发放日期:</label>
@@ -502,7 +505,7 @@ function bindQueryBtn() {
                 div.innerHTML = `
                     <img src="${item.previewUrl}" class="preview-img" alt="预览">
                     <div class="preview-item-info">
-                        <span class="preview-name">${item.file.name}</span>
+                        <span class="preview-name">${escapeHtml(item.file.name)}</span>
                         ${item.url ? '<span class="preview-status done">已上传</span>' : '<span class="preview-status pending">待上传</span>'}
                     </div>
                     <button type="button" class="preview-remove" data-index="${index}" title="移除">&times;</button>
@@ -617,26 +620,12 @@ function bindQueryBtn() {
 
 
 // 状态选项列表
-const STATUS_OPTIONS = ['已录入', '未录入', '租聘', '借用', '入库', '无需录入'];
+const STATUS_OPTIONS = ['已录入', '未录入', '租聘', '借用', '入库', '无需录入', '报废'];
 
 // 标签选项列表
-const TAG_OPTIONS = ['入职', '领用', '更换', '离职', '入库'];
+const TAG_OPTIONS = ['入职', '领用', '更换', '离职', '入库', '弃用'];
 
-// 部门选项
-const DEPT_OPTIONS = [
-    {value: '', text: '--请选择部门--'},
-    {value: 'FIN', text: 'FIN'},
-    {value: 'HR', text: 'HR'},
-    {value: 'SCM', text: 'SCM'},
-    {value: 'STU', text: 'STU'},
-    {value: 'GMO', text: 'GMO'},
-    {value: 'COM', text: 'COM'},
-    {value: 'CSG', text: 'CSG'},
-    {value: 'PMD', text: 'PMD'},
-    {value: 'IT', text: 'IT'},
-    {value: 'SMG', text: 'SMG'},
-    {value: '证券事务部', text: '证券事务部'}
-];
+// 部门选项使用 utils.js 中的 DEPARTMENTS
 
 // 状态样式映射
 function getStatusClass(status) {
@@ -667,13 +656,15 @@ function submitDetailUpdate(form, id, overrides) {
 
 // 查询结果卡片点击 → 显示详情弹窗
 window.showQueryDetail = function(cardEl) {
-    const number = cardEl.querySelector('.query-card-number').textContent;
+    const number = cardEl.dataset.number || '';
     const id = cardEl.dataset.id || '';
     const source = cardEl.dataset.source || '';
 
-    let url = `/api/asset_full_detail?number=${encodeURIComponent(number)}`;
+    let url = '/api/asset_full_detail?';
+    if (number) url += `number=${encodeURIComponent(number)}`;
     if (id && source === 'inventory') {
-        url += `&id=${encodeURIComponent(id)}`;
+        if (number) url += '&';
+        url += `id=${encodeURIComponent(id)}`;
     }
 
     fetch(url)
@@ -687,14 +678,14 @@ window.showQueryDetail = function(cardEl) {
             const body = document.getElementById('queryDetailBody');
 
             // 区块1：资产详情
-            let html = `<div class="detail-form" data-id="${basic.id}" data-number="${basic.number}" data-source="${basic.source}">`;
+            let html = `<div class="detail-form" data-id="${escapeHtml(basic.id)}" data-number="${escapeHtml(basic.number)}" data-source="${escapeHtml(basic.source)}">`;
 
             html += `<div class="detail-section">
                 <div class="detail-section-title">资产详情</div>
                 <div class="detail-basic-grid">
                     <div class="detail-basic-item">
                         <label>资产编码:</label>
-                        <span class="detail-value"><input type="text" class="edit-input" name="number" value="${basic.number || ''}" disabled></span>
+                        <span class="detail-value"><input type="text" class="edit-input" name="number" value="${escapeHtml(basic.number || '')}" disabled></span>
                     </div>
                     <div class="detail-basic-item">
                         <label>资产类型:</label>
@@ -705,7 +696,7 @@ window.showQueryDetail = function(cardEl) {
                                 <option value="笔记本电脑" ${basic.type === '笔记本电脑' ? 'selected' : ''}>笔记本电脑</option>
                                 <option value="显示器" ${basic.type === '显示器' ? 'selected' : ''}>显示器</option>
                                 <option value="其它" ${basic.type === '其它' ? 'selected' : ''}>其它</option>
-                                ${basic.type && !['台式主机', '租聘台式主机', '笔记本电脑', '显示器', '其它'].includes(basic.type) ? `<option value="${basic.type}" selected>${basic.type}</option>` : ''}
+                                ${basic.type && !['台式主机', '租聘台式主机', '笔记本电脑', '显示器', '其它'].includes(basic.type) ? `<option value="${escapeHtml(basic.type)}" selected>${escapeHtml(basic.type)}</option>` : ''}
                             </select>
                         </span>
                     </div>
@@ -713,38 +704,38 @@ window.showQueryDetail = function(cardEl) {
                         <label>使用部门:</label>
                         <span class="detail-value">
                             <select class="edit-input" name="department" disabled>
-                                ${DEPT_OPTIONS.map(o => `<option value="${o.value}" ${basic.department === o.value ? 'selected' : ''}>${o.text}</option>`).join('')}
+                                ${DEPARTMENTS.map(o => `<option value="${escapeHtml(o.value)}" ${basic.department === o.value ? 'selected' : ''}>${escapeHtml(o.text)}</option>`).join('')}
                             </select>
                         </span>
                     </div>
                     <div class="detail-basic-item">
                         <label>使用人:</label>
-                        <span class="detail-value"><input type="text" class="edit-input" name="site" value="${basic.site || ''}" disabled></span>
+                        <span class="detail-value"><input type="text" class="edit-input" name="site" value="${escapeHtml(basic.site || '')}" disabled></span>
                     </div>
                     <div class="detail-basic-item">
                         <label>发放日期:</label>
-                        <span class="detail-value"><input type="date" class="edit-input" name="datetime" value="${basic.datetime || ''}" disabled></span>
+                        <span class="detail-value"><input type="date" class="edit-input" name="datetime" value="${escapeHtml(basic.datetime || '')}" disabled></span>
                     </div>
                     <div class="detail-basic-item">
                         <label>${(basic.type || '') === '租聘台式主机' ? 'SN码:' : '资产规格:'}</label>
-                        <span class="detail-value"><input type="text" class="edit-input" value="${(basic.type || '') === '租聘台式主机' ? (hardware?.sn || '') : (hardware?.spec || '')}" disabled></span>
+                        <span class="detail-value"><input type="text" class="edit-input" value="${escapeHtml((basic.type || '') === '租聘台式主机' ? (hardware?.sn || '') : (hardware?.spec || ''))}" disabled></span>
                     </div>
                     <div class="detail-basic-item">
                         <label>备注信息:</label>
-                        <span class="detail-value"><textarea class="edit-input" name="notice" rows="1" disabled>${basic.notice || ''}</textarea></span>
+                        <span class="detail-value"><textarea class="edit-input" name="notice" rows="1" disabled>${escapeHtml(basic.notice || '')}</textarea></span>
                     </div>
                 </div>
                 <div style="margin-top:12px;">
                     <label style="font-size:13px;color:#6c757d;font-weight:500;">资产状态:</label>
                     <div class="status-toggles">
-                        <input type="hidden" name="status" value="${basic.status || ''}">
+                        <input type="hidden" name="status" value="${escapeHtml(basic.status || '')}">
                         ${STATUS_OPTIONS.map(s => `<span class="status-toggle${basic.status === s ? ' active' : ''}" data-status="${s}">${s}</span>`).join('')}
                     </div>
                 </div>
                 <div style="margin-top:12px;">
                     <label style="font-size:13px;color:#6c757d;font-weight:500;">资产标签:</label>
                     <div class="status-toggles">
-                        <input type="hidden" name="tag" value="${basic.tag || ''}">
+                        <input type="hidden" name="tag" value="${escapeHtml(basic.tag || '')}">
                         ${TAG_OPTIONS.map(t => `<span class="status-toggle${basic.tag === t ? ' active' : ''}" data-tag="${t}">${t}</span>`).join('')}
                     </div>
                 </div>
@@ -758,10 +749,10 @@ window.showQueryDetail = function(cardEl) {
                 if (['笔记本电脑', '台式主机', '租聘台式主机'].includes(assetType)) {
                     if (hardware.cpu || hardware.mem || hardware.disk || hardware.gpu) {
                         html += `<div class="hardware-grid">
-                            <div class="hardware-item"><label>CPU:</label><span class="hw-value">${hardware.cpu || '-'}</span></div>
-                            <div class="hardware-item"><label>内存:</label><span class="hw-value">${hardware.mem || '-'}</span></div>
-                            <div class="hardware-item"><label>硬盘:</label><span class="hw-value">${hardware.disk || '-'}</span></div>
-                            <div class="hardware-item"><label>显卡:</label><span class="hw-value">${hardware.gpu || '-'}</span></div>
+                            <div class="hardware-item"><label>CPU:</label><span class="hw-value">${escapeHtml(hardware.cpu || '-')}</span></div>
+                            <div class="hardware-item"><label>内存:</label><span class="hw-value">${escapeHtml(hardware.mem || '-')}</span></div>
+                            <div class="hardware-item"><label>硬盘:</label><span class="hw-value">${escapeHtml(hardware.disk || '-')}</span></div>
+                            <div class="hardware-item"><label>显卡:</label><span class="hw-value">${escapeHtml(hardware.gpu || '-')}</span></div>
                         </div>`;
                     } else {
                         html += `<div class="hardware-empty">暂无硬件配置信息</div>`;
@@ -780,12 +771,12 @@ window.showQueryDetail = function(cardEl) {
             if (history && history.length > 0) {
                 html += `<div class="history-timeline">`;
                 history.forEach(h => {
-                    html += `<div class="history-item" data-tmp-id="${h.tmp_id}">
+                    html += `<div class="history-item" data-tmp-id="${escapeHtml(h.tmp_id)}">
                         <div class="history-dot"></div>
                         <div class="history-line"></div>
                         <div class="history-content">
-                            <span class="history-date">${h.datetime || '未知日期'}</span>
-                            <span class="history-info">${h.department || '-'} - ${h.site || '-'}</span>
+                            <span class="history-date">${escapeHtml(h.datetime || '未知日期')}</span>
+                            <span class="history-info">${escapeHtml(h.department || '-')} - ${escapeHtml(h.site || '-')}</span>
                             <button class="history-delete-btn" title="删除此条历史记录" style="display:none;">
                                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" fill="#dc3545"/><line x1="4.5" y1="8" x2="11.5" y2="8" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/></svg>
                             </button>
@@ -803,11 +794,11 @@ window.showQueryDetail = function(cardEl) {
             html += `<div class="detail-section">
                 <div class="detail-section-title">附件</div>
                 <div class="attachment-detail-area">
-                    <input type="hidden" name="attachment_urls" value="${basic.attachment_urls || ''}">
+                    <input type="hidden" name="attachment_urls" value="${escapeHtml(basic.attachment_urls || '')}">
                     <div class="attachment-detail-list" id="detailAttachmentList">
                         ${attachmentUrls.length > 0 ? attachmentUrls.map((url, i) => `
-                            <div class="attachment-detail-item" data-url="${url}">
-                                <img src="${url}" class="attachment-detail-img" alt="附件图片" onclick="window.open('${url}','_blank')">
+                            <div class="attachment-detail-item" data-url="${escapeHtml(url)}">
+                                <img src="${escapeHtml(url)}" class="attachment-detail-img" alt="附件图片" onclick="window.open('${escapeHtml(url)}','_blank')">
                                 <button type="button" class="attachment-detail-remove" style="display:none;" title="移除">&times;</button>
                             </div>
                         `).join('') : '<div class="attachment-empty">暂无附件</div>'}
@@ -986,8 +977,8 @@ function bindDetailActions() {
         if (!detailAttachmentList) return;
         if (urls.length > 0) {
             detailAttachmentList.innerHTML = urls.map(url => `
-                <div class="attachment-detail-item" data-url="${url}">
-                    <img src="${url}" class="attachment-detail-img" alt="附件图片" onclick="window.open('${url}','_blank')">
+                <div class="attachment-detail-item" data-url="${escapeHtml(url)}">
+                    <img src="${escapeHtml(url)}" class="attachment-detail-img" alt="附件图片" onclick="window.open('${escapeHtml(url)}','_blank')">
                     <button type="button" class="attachment-detail-remove" style="display:${editing ? 'flex' : 'none'};" title="移除">&times;</button>
                 </div>
             `).join('');
