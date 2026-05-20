@@ -588,7 +588,7 @@ function bindQueryBtn() {
                             form.reset();
                             uploadedFiles.length = 0;
                             previewList.innerHTML = '';
-                            loadStatusData();
+                            loadStatusCounts();
                             setTimeout(() => {
                                 queryValue.value = value;
                                 queryMode.value = mode;
@@ -642,7 +642,8 @@ function submitDetailUpdate(form, id, overrides) {
     body.set('department', form.querySelector('select[name="department"]').value);
     body.set('site', form.querySelector('input[name="site"]').value.trim());
     body.set('type', form.querySelector('select[name="type"]').value);
-    body.set('datetime', form.querySelector('input[name="datetime"]').value);
+    const datetimeVal = form.querySelector('input[name="datetime"]').value.trim();
+    body.set('datetime', datetimeVal || new Date().toISOString().split('T')[0]);
     body.set('status', form.querySelector('input[name="status"]').value);
     body.set('tag', form.querySelector('input[name="tag"]') ? form.querySelector('input[name="tag"]').value : '');
     body.set('notice', form.querySelector('textarea[name="notice"]').value.trim());
@@ -880,7 +881,7 @@ function bindDetailActions() {
                         if (res.status === 'success') {
                             document.getElementById('queryDetailModal').style.display = 'none';
                             document.getElementById('queryBtn').click();
-                            loadStatusData();
+                            loadStatusCounts();
                         }
                     });
             }
@@ -965,7 +966,7 @@ function bindDetailActions() {
                         }
                         document.getElementById('queryDetailModal').style.display = 'none';
                         document.getElementById('queryBtn').click();
-                        loadStatusData();
+                        loadStatusCounts();
                     }
                 });
         }
@@ -1064,7 +1065,7 @@ function bindDetailActions() {
                                 body: `number=${numberVal}&department=${department}&site=${site}`
                             });
                         }
-                        loadStatusData();
+                        loadStatusCounts();
                         document.getElementById('queryBtn').click();
                         document.querySelectorAll('.query-card').forEach(c => {
                             if (c.querySelector('.query-card-number').textContent === numberVal) {
@@ -1141,7 +1142,7 @@ function bindDetailActions() {
                 .then(res => {
                     if (res.status === 'success') {
                         historyItem.remove();
-                        loadStatusData();
+                        loadStatusCounts();
                         document.getElementById('queryBtn').click();
                     } else {
                         alert('删除失败：' + res.message);
