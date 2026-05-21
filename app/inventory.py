@@ -619,7 +619,17 @@ def asset_full_detail():
                         'source': 'device_list'
                     }
 
-        if number:
+        if record_id and record_id.isdigit() and number:
+            cursor.execute(
+                "SELECT tmp_id, id, number, department, site, type, DATE_FORMAT(datetime, '%Y-%m-%d') as datetime, status, tag, notice FROM inventory_tmp WHERE id = %s AND number = %s ORDER BY datetime DESC",
+                (record_id, number)
+            )
+        elif record_id and record_id.isdigit():
+            cursor.execute(
+                "SELECT tmp_id, id, number, department, site, type, DATE_FORMAT(datetime, '%Y-%m-%d') as datetime, status, tag, notice FROM inventory_tmp WHERE id = %s ORDER BY datetime DESC",
+                (record_id,)
+            )
+        elif number:
             cursor.execute(
                 "SELECT tmp_id, id, number, department, site, type, DATE_FORMAT(datetime, '%Y-%m-%d') as datetime, status, tag, notice FROM inventory_tmp WHERE number = %s ORDER BY datetime DESC",
                 (number,)
