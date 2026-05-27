@@ -40,7 +40,7 @@
 
     <script src="/static/js/utils.js"></script>
     <script>
-    // 全局 fetch 封装：POST/PUT/DELETE 请求自动携带 CSRF token
+    // 全局 fetch 封装：POST/PUT/DELETE 请求自动携带 CSRF token，统一处理 session 过期
     const _originalFetch = window.fetch;
     window.fetch = function(url, options = {}) {
         const method = (options.method || 'GET').toUpperCase();
@@ -51,7 +51,21 @@
                 options.headers['X-CSRFToken'] = token;
             }
         }
-        return _originalFetch(url, options);
+        return _originalFetch(url, options).then(response => {
+            // session 过期或 CSRF 失效：后端返回 401 或 400（CSRF 错误返回 HTML）
+            if (response.status === 401) {
+                alert('登录已过期，请重新登录');
+                window.location.href = '/login';
+                return Promise.reject(new Error('session expired'));
+            }
+            // CSRF token 过期时 Flask-WTF 返回 400 且 Content-Type 是 text/html
+            if (response.status === 400 && !response.headers.get('content-type')?.includes('application/json')) {
+                alert('页面已过期（CSRF token 失效），即将刷新页面');
+                window.location.reload();
+                return Promise.reject(new Error('csrf expired'));
+            }
+            return response;
+        });
     };
     </script>
     {% block extra_js %}{% endblock %}

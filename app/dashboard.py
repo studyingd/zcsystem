@@ -61,16 +61,22 @@ _stock_tags = "','".join(STOCK_TAGS)
 
 STOCK_SQL = f"""
 SELECT
-  (SELECT COUNT(*) FROM device_list WHERE type='笔记本电脑' AND department='{STOCK_CUSTODIAN_DEPT}' AND name='{STOCK_CUSTODIAN_NAME}')
-  + (SELECT COUNT(*) FROM inventory WHERE type='笔记本电脑' AND number >= '{NEW_LAPTOP_THRESHOLD}' AND tag IN ('{_stock_tags}'))
+  (SELECT COUNT(*) FROM (
+    SELECT number FROM device_list WHERE type='笔记本电脑' AND department='{STOCK_CUSTODIAN_DEPT}' AND name='{STOCK_CUSTODIAN_NAME}'
+    UNION
+    SELECT number FROM inventory WHERE type='笔记本电脑' AND number >= '{NEW_LAPTOP_THRESHOLD}' AND tag IN ('{_stock_tags}')
+  ) t)
   AS new_laptop_stock,
 
   (SELECT COUNT(*) FROM inventory WHERE type LIKE '%%笔记本%%'
    AND site IN ('{_old_laptop_sites}') AND number < '{NEW_LAPTOP_THRESHOLD}')
   AS old_laptop_stock,
 
-  (SELECT COUNT(*) FROM device_list WHERE type='显示器' AND department='{STOCK_CUSTODIAN_DEPT}' AND name='{STOCK_CUSTODIAN_NAME}')
-  + (SELECT COUNT(*) FROM inventory WHERE type='显示器' AND number >= '{NEW_MONITOR_THRESHOLD}' AND tag IN ('{_stock_tags}'))
+  (SELECT COUNT(*) FROM (
+    SELECT number FROM device_list WHERE type='显示器' AND department='{STOCK_CUSTODIAN_DEPT}' AND name='{STOCK_CUSTODIAN_NAME}'
+    UNION
+    SELECT number FROM inventory WHERE type='显示器' AND number >= '{NEW_MONITOR_THRESHOLD}' AND tag IN ('{_stock_tags}')
+  ) t)
   AS new_monitor_stock,
 
   (SELECT COUNT(*) FROM inventory WHERE type='显示器'
@@ -97,7 +103,7 @@ STOCK_DETAIL_MAP = {
     'new_laptop_stock': {
         'queries': [
             (f"SELECT id, number, type, spec, department as dept, name as site FROM device_list WHERE type='笔记本电脑' AND department='{STOCK_CUSTODIAN_DEPT}' AND name='{STOCK_CUSTODIAN_NAME}'", []),
-            (f"SELECT id, number, type, '' as spec, department as dept, site, datetime, tag FROM inventory WHERE type='笔记本电脑' AND number >= '{NEW_LAPTOP_THRESHOLD}' AND tag IN ('{_stock_tags}')", []),
+            (f"SELECT id, number, type, '' as spec, department as dept, site, datetime, tag FROM inventory WHERE type='笔记本电脑' AND number >= '{NEW_LAPTOP_THRESHOLD}' AND tag IN ('{_stock_tags}') AND number NOT IN (SELECT number FROM device_list WHERE type='笔记本电脑' AND department='{STOCK_CUSTODIAN_DEPT}' AND name='{STOCK_CUSTODIAN_NAME}')", []),
         ],
         'title': '新笔记本库存明细',
     },
@@ -110,7 +116,7 @@ STOCK_DETAIL_MAP = {
     'new_monitor_stock': {
         'queries': [
             (f"SELECT id, number, type, spec, department as dept, name as site FROM device_list WHERE type='显示器' AND department='{STOCK_CUSTODIAN_DEPT}' AND name='{STOCK_CUSTODIAN_NAME}'", []),
-            (f"SELECT id, number, type, '' as spec, department as dept, site, datetime, tag FROM inventory WHERE type='显示器' AND number >= '{NEW_MONITOR_THRESHOLD}' AND tag IN ('{_stock_tags}')", []),
+            (f"SELECT id, number, type, '' as spec, department as dept, site, datetime, tag FROM inventory WHERE type='显示器' AND number >= '{NEW_MONITOR_THRESHOLD}' AND tag IN ('{_stock_tags}') AND number NOT IN (SELECT number FROM device_list WHERE type='显示器' AND department='{STOCK_CUSTODIAN_DEPT}' AND name='{STOCK_CUSTODIAN_NAME}')", []),
         ],
         'title': '新显示器库存明细',
     },
