@@ -62,9 +62,9 @@ _stock_tags = "','".join(STOCK_TAGS)
 STOCK_SQL = f"""
 SELECT
   (SELECT COUNT(*) FROM (
-    SELECT number FROM device_list WHERE type='笔记本电脑' AND department='{STOCK_CUSTODIAN_DEPT}' AND name='{STOCK_CUSTODIAN_NAME}'
+    SELECT CONVERT(number USING utf8mb4) COLLATE utf8mb4_general_ci AS number FROM device_list WHERE type='笔记本电脑' AND department='{STOCK_CUSTODIAN_DEPT}' AND name='{STOCK_CUSTODIAN_NAME}'
     UNION
-    SELECT number FROM inventory WHERE type='笔记本电脑' AND number >= '{NEW_LAPTOP_THRESHOLD}' AND tag IN ('{_stock_tags}')
+    SELECT CONVERT(number USING utf8mb4) COLLATE utf8mb4_general_ci AS number FROM inventory WHERE type='笔记本电脑' AND number >= '{NEW_LAPTOP_THRESHOLD}' AND tag IN ('{_stock_tags}')
   ) t)
   AS new_laptop_stock,
 
@@ -73,9 +73,9 @@ SELECT
   AS old_laptop_stock,
 
   (SELECT COUNT(*) FROM (
-    SELECT number FROM device_list WHERE type='显示器' AND department='{STOCK_CUSTODIAN_DEPT}' AND name='{STOCK_CUSTODIAN_NAME}'
+    SELECT CONVERT(number USING utf8mb4) COLLATE utf8mb4_general_ci AS number FROM device_list WHERE type='显示器' AND department='{STOCK_CUSTODIAN_DEPT}' AND name='{STOCK_CUSTODIAN_NAME}'
     UNION
-    SELECT number FROM inventory WHERE type='显示器' AND number >= '{NEW_MONITOR_THRESHOLD}' AND tag IN ('{_stock_tags}')
+    SELECT CONVERT(number USING utf8mb4) COLLATE utf8mb4_general_ci AS number FROM inventory WHERE type='显示器' AND number >= '{NEW_MONITOR_THRESHOLD}' AND tag IN ('{_stock_tags}')
   ) t)
   AS new_monitor_stock,
 
@@ -282,7 +282,8 @@ def dashboard_stats():
             'stocks': stocks,
         })
     except Exception as e:
-        return jsonify({'status': 'error', 'message': '服务器内部错误'}), 500
+        logger.error("dashboard_stats 异常: %s", e, exc_info=True)
+        return jsonify({'status': 'error', 'message': f'服务器内部错误: {e}'}), 500
     finally:
         cursor.close()
         conn.close()
