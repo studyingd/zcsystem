@@ -2,7 +2,37 @@
     margin: 0;
     padding: 0;
     box-sizing: border-box;
-    font-family: "Microsoft YaHei", "PingFang SC", -apple-system, sans-serif;
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+}
+
+/* === 设计 Token（与 index.css 同一主色系） === */
+:root {
+    --color-primary: #1e3a5f;
+    --color-primary-hover: #16304f;
+    --color-primary-rgb: 30, 58, 95;
+    --color-focus: #2563eb;
+    --color-text: #0f172a;
+    --color-muted: #64748b;
+    --color-border: #e4e7eb;
+    --color-danger: #dc2626;
+    --color-danger-bg: #fef2f2;
+    --color-danger-border: #fecaca;
+    --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+}
+
+/* 无障碍：键盘焦点可见 + 尊重减少动效 */
+:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+    .login-container, .error-message { animation: none !important; }
 }
 
 html {
@@ -27,7 +57,7 @@ body {
 /* 左侧品牌区 */
 .login-brand {
     flex: 1;
-    background: linear-gradient(135deg, #0b1a3a 0%, #163a7a 50%, #1e5bb8 100%);
+    background: linear-gradient(135deg, #101f33 0%, #14273e 45%, #1e3a5f 100%);
     display: flex;
     flex-direction: column;
     justify-content: center;
@@ -287,7 +317,7 @@ body {
 .login-btn {
     width: 100%;
     padding: clamp(12px, 1.1vh, 14px) 20px;
-    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+    background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-hover) 100%);
     color: white;
     border: none;
     border-radius: 10px;

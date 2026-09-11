@@ -1,502 +1,737 @@
-let statusData = {};
-let currentMonth = '';
-let initialLoadDone = false;
+/**
+ * 资产登记页交互。
+ *
+ * 后端口径见 app/asset.py 与 app/ledger.py：
+ *  - 编码预览 /api/generate_asset_codes：防抖 + AbortController，避免乱序响应覆盖新结果
+ *  - 提交     /api/batch_create_assets：提交期间禁用按钮，防连点产生重复资产；
+ *             成功响应带回实际编码区间（预览仅供参考，取号可能被他人抢先）
+ *  - 列表     /api/get_all_assets：月份 / 前缀 / 关键字筛选 + 分页
+ *  - 详情     /api/get_asset_detail：部门、使用人、状态取 inventory 最新一条流转记录
+ *
+ * 词表（部门 / 状态 / 标签）与弹窗行为分别复用 utils.js 与 modal.js。
+ */
 
-window.addEventListener('DOMContentLoaded', () => {
-    // 设置默认年月为当前年月
+const REGISTER_CONFIG = JSON.parse(document.getElementById('registerConfig').textContent);
+
+const state = {
+    month: '',
+    prefix: '',
+    q: '',
+    page: 1,
+    pageSize: REGISTER_CONFIG.page_size,
+    total: 0,
+    totalPages: 1,
+    rows: [],
+    months: [],
+    initialized: false,
+    submitting: false,
+    iconBase: '',
+    brandIcons: [],
+    previewController: null,
+    listController: null,
+};
+
+const el = {};
+
+// 字段 -> [表单组 data-field, 错误提示 span id, 控件 id]
+// 顺序与表单的视觉顺序一致：focusFirstError 按此找到第一个出错控件
+const FIELD_MAP = {
+    asset_type: ['asset_type', 'assetTypeError', 'assetType'],
+    batch_quantity: ['batch_quantity', 'batchQuantityError', 'batchQuantity'],
+    asset_spec: ['asset_spec', 'assetSpecError', 'assetSpec'],
+    sn: ['sn', 'snError', 'assetSN'],
+};
+
+function debounce(fn, wait) {
+    let timer = null;
+    return function (...args) {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn.apply(this, args), wait);
+    };
+}
+
+function currentMonthValue() {
     const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    document.getElementById('assetYearMonth').value = `${year}-${month}`;
-
-    bindAssetTypeChange();
-    bindPreviewBtn();
-    bindFormSubmit();
-    bindAssetListControls();
-    bindAssetDetailModal();
-    loadAssetList();
-});
-
-function bindAssetTypeChange() {
-    const assetType = document.getElementById('assetType');
-    const customTypeInput = document.getElementById('customType');
-    const snField = document.getElementById('snField');
-
-    assetType.addEventListener('change', () => {
-        const type = assetType.value;
-
-        // 显示/隐藏自定义类型输入框
-        if (type === '其它') {
-            customTypeInput.style.display = 'inline-block';
-            customTypeInput.required = true;
-        } else {
-            customTypeInput.style.display = 'none';
-            customTypeInput.required = false;
-            customTypeInput.value = '';
-        }
-
-        // 显示/隐藏SN码输入框（租聘台式主机）
-        if (type === '租聘台式主机') {
-            snField.style.display = 'flex';
-            // 默认填入EDY易点云
-            document.getElementById('assetSpec').value = 'EDY易点云';
-        } else {
-            snField.style.display = 'none';
-        }
-
-        updateConfigFields(type);
-        updateCodePreview();
-    });
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }
 
-function updateConfigFields(type) {
-    const configSection = document.getElementById('configSection');
-    const configFields = document.getElementById('configFields');
+// ---------- 资产年月：年 / 月两个下拉 ----------
+// 原生 <input type="month"> 只有 Chromium 系实现了月份选择器，
+// Safari / Firefox 会退化成纯文本框。这里用两个 select 组合，
+// 值仍落在隐藏域 assetYearMonth 上（YYYY-MM），后端口径不变。
+function yearMonthParts(value) {
+    const matched = /^(\d{4})-(\d{2})$/.exec(value || '');
+    return matched ? { year: matched[1], month: matched[2] } : null;
+}
 
-    if (!['笔记本电脑', '台式主机', '租聘台式主机'].includes(type)) {
-        configSection.style.display = 'none';
-        configFields.innerHTML = '';
+function buildYearMonthOptions() {
+    const currentYear = new Date().getFullYear();
+    const years = [];
+    for (let year = currentYear + 1; year >= currentYear - 5; year--) years.push(year);
+    el.assetYearMonthYear.innerHTML = years
+        .map(year => `<option value="${year}">${year}年</option>`).join('');
+    el.assetYearMonthMonth.innerHTML = Array.from({ length: 12 }, (_, index) => {
+        const month = String(index + 1).padStart(2, '0');
+        return `<option value="${month}">${index + 1}月</option>`;
+    }).join('');
+}
+
+/** 写入值（初始化 / 外部回填用），不触发 change，避免初始化时就打预览请求 */
+function setYearMonth(value) {
+    const parts = yearMonthParts(value) || yearMonthParts(currentMonthValue());
+    el.assetYearMonthYear.value = parts.year;
+    el.assetYearMonthMonth.value = parts.month;
+    syncYearMonth(false);
+}
+
+/** 两个下拉 -> 隐藏域；notify 时派发 change，复用既有的预览监听 */
+function syncYearMonth(notify = true) {
+    const value = `${el.assetYearMonthYear.value}-${el.assetYearMonthMonth.value}`;
+    if (el.assetYearMonth.value === value) return;
+    el.assetYearMonth.value = value;
+    if (notify) el.assetYearMonth.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+function monthLabel(month) {
+    return `20${month.slice(0, 2)}年${month.slice(2, 4)}月`;
+}
+
+function isConfigType(type) {
+    return REGISTER_CONFIG.config_types.includes(type);
+}
+
+/** 按规格匹配品牌图标（关键字与地址由后端 meta 下发，不再硬编码内网 IP） */
+function brandIcon(spec) {
+    if (!spec || !state.iconBase) return '';
+    const upper = String(spec).toUpperCase();
+    const hit = state.brandIcons.find(item => item.keywords.some(key => upper.includes(key)));
+    return hit ? state.iconBase + hit.file : '';
+}
+
+function cacheElements() {
+    [
+        'assetRegisterForm', 'assetType', 'customType', 'assetSpec', 'assetSN',
+        'assetDept', 'assetUser', 'assetYearMonth', 'assetYearMonthYear', 'assetYearMonthMonth',
+        'batchQuantity', 'configSection',
+        'configToggle', 'configFields', 'configCPU', 'configMem', 'configDisk', 'configGPU',
+        'codePreview', 'registerMsg', 'submitBtn', 'resetBtn', 'filterMonth', 'filterPrefix',
+        'searchInput', 'refreshAssetList', 'assetListContainer', 'listPagination',
+        'listMsg', 'assetDetailModal', 'assetDetailContent',
+    ].forEach(id => { el[id] = document.getElementById(id); });
+}
+
+// ---------- 字段级错误提示（就近显示，不用底部大横幅） ----------
+function setFieldError(field, message) {
+    const mapping = FIELD_MAP[field];
+    if (!mapping) return;
+    const [groupKey, errorId, controlId] = mapping;
+    const group = document.querySelector(`.form-group[data-field="${groupKey}"]`);
+    const errorEl = document.getElementById(errorId);
+    const control = document.getElementById(controlId);
+    if (group) group.classList.toggle('has-error', Boolean(message));
+    if (errorEl) {
+        errorEl.textContent = message || '';
+        errorEl.hidden = !message;
+    }
+    if (control) {
+        if (message) {
+            control.setAttribute('aria-invalid', 'true');
+        } else {
+            control.removeAttribute('aria-invalid');
+        }
+    }
+}
+
+function clearFieldErrors() {
+    Object.keys(FIELD_MAP).forEach(field => setFieldError(field, ''));
+}
+
+/** 第一个出错的控件获得焦点，用户不用自己在长表单里找 */
+function focusFirstError(errors) {
+    const field = Object.keys(FIELD_MAP).find(key => errors[key]);
+    if (!field) return;
+    const control = document.getElementById(FIELD_MAP[field][2]);
+    if (control) control.focus();
+}
+
+// ---------- 表单：类型联动 ----------
+function selectedType() {
+    const type = el.assetType.value;
+    return type === REGISTER_CONFIG.custom_type_option ? el.customType.value.trim() : type;
+}
+
+function snLines() {
+    return el.assetSN.value.split('\n').map(line => line.trim()).filter(Boolean);
+}
+
+function applyTypeUi() {
+    const type = el.assetType.value;
+    const isCustom = type === REGISTER_CONFIG.custom_type_option;
+    const isRental = type === REGISTER_CONFIG.rental_type;
+
+    el.customType.hidden = !isCustom;
+    el.customType.required = isCustom;
+    if (!isCustom) el.customType.value = '';
+
+    // SN 仅租聘机必填（逐台一个）；其余类型整组隐藏并清空，
+    // 避免上次选了租聘机留下的 SN 被静默带到下一批
+    const snGroup = document.querySelector('.form-group[data-field="sn"]');
+    if (snGroup) snGroup.hidden = !isRental;
+    el.assetSN.required = isRental;
+    if (!isRental) {
+        el.assetSN.value = '';
+        setFieldError('sn', '');
+    }
+
+    // 硬件配置仅电脑类资产需要
+    el.configSection.hidden = !isConfigType(type);
+    if (!isConfigType(type)) {
+        [el.configCPU, el.configMem, el.configDisk, el.configGPU].forEach(input => { input.value = ''; });
+    }
+
+    // 租聘机规格默认值：只在用户还没填时回填，不覆盖已有输入
+    if (isRental && !el.assetSpec.value.trim()) {
+        el.assetSpec.value = REGISTER_CONFIG.rental_default_spec;
+    }
+
+    setFieldError('asset_type', '');
+    syncSnRows();
+    refreshPreview();
+}
+
+/** textarea 行数跟随批量数量，逐台填 SN 时不用滚动 */
+function syncSnRows() {
+    const quantity = parseInt(el.batchQuantity.value, 10) || 1;
+    el.assetSN.rows = Math.min(6, Math.max(2, quantity));
+}
+
+// ---------- 表单：编码预览 ----------
+function refreshPreview() {
+    const type = selectedType() || el.assetType.value;
+    const quantity = parseInt(el.batchQuantity.value, 10) || 1;
+    const yearMonth = el.assetYearMonth.value;
+
+    if (!type) {
+        el.codePreview.innerHTML = '<span class="code-preview-empty">选择资产类型后自动生成</span>';
         return;
     }
 
-    configSection.style.display = 'block';
+    // 取消上一个未完成的请求，避免慢响应回来后覆盖新结果
+    if (state.previewController) state.previewController.abort();
+    state.previewController = new AbortController();
 
-    let html = '<div class="config-row">';
-
-    html += `
-        <div class="config-item">
-            <label>CPU:</label>
-            <input type="text" id="configCPU" placeholder="如: Intel i5-12400">
-        </div>
-        <div class="config-item">
-            <label>Mem:</label>
-            <input type="text" id="configMem" placeholder="如: 16GB DDR4">
-        </div>
-        <div class="config-item">
-            <label>Disk:</label>
-            <input type="text" id="configDisk" placeholder="如: 512GB SSD">
-        </div>
-        <div class="config-item">
-            <label>GPU:</label>
-            <input type="text" id="configGPU" placeholder="如: RTX 3060">
-        </div>
-    `;
-
-    html += '</div>';
-    configFields.innerHTML = html;
-}
-
-function bindPreviewBtn() {
-    const previewBtn = document.getElementById('previewBtn');
-    previewBtn.addEventListener('click', () => {
-        updateCodePreview();
-    });
-
-    // 也在资产类型、数量、年月变化时自动更新预览
-    document.getElementById('assetType').addEventListener('change', updateCodePreview);
-    document.getElementById('batchQuantity').addEventListener('input', updateCodePreview);
-    document.getElementById('assetYearMonth').addEventListener('change', updateCodePreview);
-}
-
-function updateCodePreview() {
-    const assetType = document.getElementById('assetType').value;
-    const quantity = parseInt(document.getElementById('batchQuantity').value) || 1;
-    const yearMonth = document.getElementById('assetYearMonth').value;
-    const codePreview = document.getElementById('codePreview');
-
-    if (!assetType) {
-        codePreview.innerHTML = '<span style="color: #6c757d;">请选择资产类型</span>';
-        return;
-    }
-
-    // 调用后端 API 获取实际编码
+    el.codePreview.classList.add('is-loading');
     fetch('/api/generate_asset_codes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ asset_type: assetType, quantity: quantity, year_month: yearMonth })
+        body: JSON.stringify({ asset_type: type, quantity, year_month: yearMonth }),
+        signal: state.previewController.signal,
     })
         .then(response => response.json())
         .then(res => {
-            if (res.status === 'success') {
-                let html = '';
-                const codes = res.codes;
-                for (let i = 0; i < Math.min(codes.length, 20); i++) {
-                    html += `<div class="code-preview-item">${escapeHtml(codes[i])}</div>`;
-                }
-                if (codes.length > 20) {
-                    html += `<div class="code-preview-item" style="color: #6c757d;">... 共 ${escapeHtml(String(codes.length))} 个编码</div>`;
-                }
-                codePreview.innerHTML = html;
-            } else {
-                codePreview.innerHTML = '<span style="color: #f8d7da;">获取编码失败</span>';
+            el.codePreview.classList.remove('is-loading');
+            if (res.status !== 'success') {
+                el.codePreview.innerHTML = `<span class="code-preview-empty">${escapeHtml(res.message || '获取编码失败')}</span>`;
+                return;
             }
+            const codes = res.codes || [];
+            const shown = codes.slice(0, 12);
+            const html = shown.map(code => `<span class="code-chip">${escapeHtml(code)}</span>`).join('');
+            const more = codes.length > shown.length
+                ? `<span class="code-chip code-chip-more">… 共 ${codes.length} 个</span>`
+                : '';
+            el.codePreview.innerHTML = `<div class="code-chips">${html}${more}</div>
+                <p class="code-preview-note">预览仅供参考，实际编码以提交结果为准</p>`;
         })
         .catch(error => {
-            codePreview.innerHTML = '<span style="color: #f8d7da;">获取编码失败</span>';
+            el.codePreview.classList.remove('is-loading');
+            if (error.name === 'AbortError') return;
+            el.codePreview.innerHTML = '<span class="code-preview-empty">获取编码失败，请重试</span>';
         });
 }
 
-function bindFormSubmit() {
-    const form = document.getElementById('assetRegisterForm');
-    const msgEl = document.getElementById('registerMsg');
-
-    form.addEventListener('submit', (e) => {
-        e.preventDefault();
-
-        let assetType = document.getElementById('assetType').value;
-        const assetSpec = document.getElementById('assetSpec').value;
-        const batchQuantity = parseInt(document.getElementById('batchQuantity').value);
-
-        // 如果选择"其它"，使用自定义类型
-        if (assetType === '其它') {
-            const customType = document.getElementById('customType').value.trim();
-            if (!customType) {
-                msgEl.style.display = 'block';
-                msgEl.className = 'msg-box msg-error';
-                msgEl.textContent = '请输入自定义资产类型';
-                return;
-            }
-            assetType = customType;
-        }
-
-        if (!assetType || !assetSpec) {
-            msgEl.style.display = 'block';
-            msgEl.className = 'msg-box msg-error';
-            msgEl.textContent = '请填写所有必填字段';
-            return;
-        }
-
-        // 收集配置信息
-        let config = {};
-        if (['笔记本电脑', '台式主机', '租聘台式主机'].includes(assetType)) {
-            config = {
-                cpu: document.getElementById('configCPU')?.value || '',
-                mem: document.getElementById('configMem')?.value || '',
-                disk: document.getElementById('configDisk')?.value || '',
-                gpu: document.getElementById('configGPU')?.value || ''
-            };
-            // 租聘台式主机需要SN码
-            if (assetType === '租聘台式主机') {
-                const sn = document.getElementById('assetSN')?.value.trim();
-                if (!sn) {
-                    msgEl.style.display = 'block';
-                    msgEl.className = 'msg-box msg-error';
-                    msgEl.textContent = '请输入SN码';
-                    return;
-                }
-                config.sn = sn;
-            }
-        } else {
-            config = {
-                desc: document.getElementById('configDesc')?.value || ''
-            };
-        }
-
-        const formData = {
-            asset_type: assetType,
-            asset_spec: assetSpec,
-            asset_dept: document.getElementById('assetDept')?.value || '',
-            asset_user: document.getElementById('assetUser')?.value || '',
-            year_month: document.getElementById('assetYearMonth')?.value || '',
-            batch_quantity: batchQuantity,
-            config: config
-        };
-
-        fetch('/api/batch_create_assets', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(formData)
-        })
-            .then(response => {
-                if (!response.ok) throw new Error('网络请求失败');
-                return response.json();
-            })
-            .then(res => {
-                msgEl.style.display = 'block';
-                if (res.status === 'success') {
-                    msgEl.className = 'msg-box msg-success';
-                    msgEl.textContent = res.message;
-                    form.reset();
-                    // 恢复资产年月为当前年月
-                    const now = new Date();
-                    const curYear = now.getFullYear();
-                    const curMonth = String(now.getMonth() + 1).padStart(2, '0');
-                    document.getElementById('assetYearMonth').value = `${curYear}-${curMonth}`;
-                    updateConfigFields('');
-                    updateCodePreview();
-                    // 刷新资产列表
-                    loadAssetList();
-                } else {
-                    msgEl.className = 'msg-box msg-error';
-                    msgEl.textContent = res.message;
-                }
-                setTimeout(() => {
-                    msgEl.style.display = 'none';
-                }, 5000);
-            })
-            .catch(error => {
-                msgEl.style.display = 'block';
-                msgEl.className = 'msg-box msg-error';
-                msgEl.textContent = '登记失败，请重试';
-                console.error(error);
-            });
-    });
+// ---------- 表单：校验与提交 ----------
+function showMessage(text, kind) {
+    el.registerMsg.textContent = text;
+    el.registerMsg.className = `msg-box ${kind === 'error' ? 'msg-error' : 'msg-success'}`;
+    el.registerMsg.hidden = false;
+    clearTimeout(showMessage._timer);
+    showMessage._timer = setTimeout(() => { el.registerMsg.hidden = true; }, 6000);
 }
 
-function bindAssetListControls() {
-    const filterMonth = document.getElementById('filterMonth');
-    const refreshBtn = document.getElementById('refreshAssetList');
-
-    filterMonth.addEventListener('change', () => {
-        currentMonth = filterMonth.value;
-        loadAssetList();
-    });
-
-    refreshBtn.addEventListener('click', () => {
-        loadAssetList();
-    });
+/** 列表 / 详情类错误就近显示在列表面板，不要跑到左侧表单底部 */
+function showListMessage(text, kind) {
+    el.listMsg.textContent = text;
+    el.listMsg.className = `msg-box ${kind === 'error' ? 'msg-error' : 'msg-success'}`;
+    el.listMsg.hidden = false;
+    clearTimeout(showListMessage._timer);
+    showListMessage._timer = setTimeout(() => { el.listMsg.hidden = true; }, 6000);
 }
 
-function loadAssetList() {
-    const container = document.getElementById('assetListContainer');
-    container.innerHTML = '<div class="loading-tip">加载中...</div>';
+function validateForm() {
+    const errors = {};
+    const rawType = el.assetType.value;
+    const type = selectedType();
 
-    let url = '/api/get_all_assets';
-    if (currentMonth) {
-        url += `?month=${encodeURIComponent(currentMonth)}`;
+    if (!rawType) {
+        errors.asset_type = '请选择资产类型';
+    } else if (rawType === REGISTER_CONFIG.custom_type_option && !type) {
+        errors.asset_type = '请输入自定义资产类型';
     }
 
-    fetch(url)
-        .then(response => response.json())
-        .then(res => {
-            if (res.status === 'success') {
-                renderMonthOptions(res.months);
-                window._assetRows = [];
-                for (const month in res.grouped) {
-                    window._assetRows = window._assetRows.concat(res.grouped[month]['DZ'] || []);
-                    window._assetRows = window._assetRows.concat(res.grouped[month]['ZL'] || []);
-                }
-                renderAssetListByGroup(res.grouped);
-            } else {
-                container.innerHTML = '<div class="loading-tip">加载失败</div>';
+    if (!el.assetSpec.value.trim()) errors.asset_spec = '请输入资产规格';
+
+    const quantity = parseInt(el.batchQuantity.value, 10);
+    if (!Number.isInteger(quantity) || quantity < 1) {
+        errors.batch_quantity = '批量数量至少为 1';
+    } else if (quantity > REGISTER_CONFIG.max_batch) {
+        errors.batch_quantity = `单次批量数量不能超过 ${REGISTER_CONFIG.max_batch} 个`;
+    }
+
+    if (rawType === REGISTER_CONFIG.rental_type) {
+        const lines = snLines();
+        const expected = Number.isInteger(quantity) ? quantity : 1;
+        if (lines.length !== expected) {
+            errors.sn = `需填写 ${expected} 个 SN（每行一个），当前 ${lines.length} 个`;
+        } else if (new Set(lines).size !== lines.length) {
+            errors.sn = 'SN 码存在重复，请逐台核对';
+        }
+    }
+
+    return errors;
+}
+
+function buildPayload() {
+    const quantity = parseInt(el.batchQuantity.value, 10) || 1;
+    const type = selectedType();
+    const config = {};
+    if (isConfigType(el.assetType.value)) {
+        config.cpu = el.configCPU.value.trim();
+        config.mem = el.configMem.value.trim();
+        config.disk = el.configDisk.value.trim();
+        config.gpu = el.configGPU.value.trim();
+    }
+    if (el.assetType.value === REGISTER_CONFIG.rental_type) config.sn_list = snLines();
+
+    return {
+        asset_type: type,
+        asset_spec: el.assetSpec.value.trim(),
+        asset_dept: el.assetDept.value,
+        asset_user: el.assetUser.value.trim(),
+        year_month: el.assetYearMonth.value,
+        batch_quantity: quantity,
+        config,
+    };
+}
+
+function setSubmitting(submitting) {
+    state.submitting = submitting;
+    el.submitBtn.disabled = submitting;
+    el.resetBtn.disabled = submitting;
+    el.submitBtn.classList.toggle('is-busy', submitting);
+    el.submitBtn.querySelector('.btn-label').textContent = submitting ? '登记中…' : '确认登记';
+}
+
+/** 提交成功后只清空「本批」输入：类型/规格/部门/使用人/年月保留，便于连续登记同规格资产 */
+function resetBatchInputs() {
+    el.batchQuantity.value = '1';
+    el.assetSN.value = '';
+    [el.configCPU, el.configMem, el.configDisk, el.configGPU].forEach(input => { input.value = ''; });
+    syncSnRows();
+    clearFieldErrors();
+}
+
+function handleSubmit(event) {
+    event.preventDefault();
+    if (state.submitting) return;
+
+    const errors = validateForm();
+    clearFieldErrors();
+    Object.entries(errors).forEach(([field, message]) => setFieldError(field, message));
+    if (Object.keys(errors).length) {
+        showMessage('请先修正表单中标红的字段', 'error');
+        focusFirstError(errors);
+        return;
+    }
+
+    const payload = buildPayload();
+    setSubmitting(true);
+
+    fetch('/api/batch_create_assets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    })
+        .then(response => response.json().then(data => ({ ok: response.ok, data })))
+        .then(({ data }) => {
+            if (data.status !== 'success') {
+                showMessage(data.message || '登记失败，请重试', 'error');
+                return;
             }
+            showMessage(data.message, 'success');
+            resetBatchInputs();
+            // 让列表立刻显示这批新资产：切到登记所属月份的第一页
+            const yymm = (payload.year_month || '').replace('-', '').slice(2);
+            state.month = yymm;
+            state.page = 1;
+            loadList(yymm);
+            refreshPreview();
         })
         .catch(error => {
             console.error(error);
-            container.innerHTML = '<div class="loading-tip">加载失败</div>';
+            showMessage('登记失败，请检查网络后重试', 'error');
+        })
+        .finally(() => setSubmitting(false));
+}
+
+// ---------- 表单绑定 ----------
+function bindForm() {
+    const debouncedPreview = debounce(refreshPreview, 300);
+    const debouncedSnHint = debounce(() => {
+        syncSnRows();
+        if (el.assetType.value === REGISTER_CONFIG.rental_type) {
+            const errors = validateForm();
+            setFieldError('sn', errors.sn || '');
+        }
+    }, 200);
+
+    el.assetType.addEventListener('change', applyTypeUi);
+    el.customType.addEventListener('input', debouncedPreview);
+    el.batchQuantity.addEventListener('input', () => { debouncedSnHint(); debouncedPreview(); });
+    el.assetYearMonth.addEventListener('change', debouncedPreview);
+    el.assetYearMonthYear.addEventListener('change', () => syncYearMonth());
+    el.assetYearMonthMonth.addEventListener('change', () => syncYearMonth());
+    el.assetSN.addEventListener('input', debouncedSnHint);
+
+    // 输入即清除该字段的错误态，避免「改好了还红着」
+    [['assetType', 'asset_type'], ['customType', 'asset_type'], ['assetSpec', 'asset_spec'],
+     ['batchQuantity', 'batch_quantity'], ['assetSN', 'sn']].forEach(([id, field]) => {
+        el[id].addEventListener('input', () => setFieldError(field, ''));
+        el[id].addEventListener('change', () => setFieldError(field, ''));
+    });
+
+    el.configToggle.addEventListener('click', () => {
+        const expanded = el.configToggle.getAttribute('aria-expanded') === 'true';
+        el.configToggle.setAttribute('aria-expanded', String(!expanded));
+        el.configFields.hidden = expanded;
+        el.configSection.classList.toggle('is-collapsed', expanded);
+    });
+
+    el.resetBtn.addEventListener('click', () => {
+        resetBatchInputs();
+        el.registerMsg.hidden = true;
+        refreshPreview();
+    });
+
+    el.assetRegisterForm.addEventListener('submit', handleSubmit);
+}
+
+/** 品牌图标地址由后端下发（对象存储），前端不再硬编码内网 IP */
+function loadMeta() {
+    return fetch('/api/asset_register/meta')
+        .then(response => response.json())
+        .then(res => {
+            if (res.status === 'success') {
+                state.iconBase = res.icon_base || '';
+                state.brandIcons = res.brand_icons || [];
+            }
+        })
+        .catch(error => console.error('加载页面元数据失败', error));
+}
+
+// ---------- 资产列表 ----------
+function listQuery() {
+    const params = new URLSearchParams();
+    if (state.month) params.set('month', state.month);
+    if (state.prefix) params.set('prefix', state.prefix);
+    if (state.q) params.set('q', state.q);
+    params.set('page', String(state.page));
+    params.set('page_size', String(state.pageSize));
+    return params.toString();
+}
+
+function setListState(html) {
+    el.assetListContainer.innerHTML = `<div class="list-state">${html}</div>`;
+    el.listPagination.hidden = true;
+}
+
+function loadList(monthOverride) {
+    if (typeof monthOverride === 'string') state.month = monthOverride;
+
+    if (state.listController) state.listController.abort();
+    state.listController = new AbortController();
+
+    el.assetListContainer.classList.add('is-loading');
+    setListState('加载中…');
+
+    fetch(`/api/get_all_assets?${listQuery()}`, { signal: state.listController.signal })
+        .then(response => response.json())
+        .then(res => {
+            el.assetListContainer.classList.remove('is-loading');
+            if (res.status !== 'success') {
+                setListState(`${escapeHtml(res.message || '加载失败')}
+                    <button type="button" class="btn-secondary btn-sm" data-list-retry>重试</button>`);
+                return;
+            }
+            // 首屏默认只看最近月份，避免一次拉全部台账（仅首次多一次请求）
+            if (!state.initialized) {
+                state.initialized = true;
+                if (!state.month && !state.q && res.months && res.months.length) {
+                    state.month = res.months[0];
+                    loadList();
+                    return;
+                }
+            }
+            renderList(res);
+        })
+        .catch(error => {
+            // 被新请求主动取消的旧请求：容器状态归新请求管，这里不能动
+            if (error.name === 'AbortError') return;
+            el.assetListContainer.classList.remove('is-loading');
+            console.error(error);
+            setListState(`加载失败，请检查网络
+                <button type="button" class="btn-secondary btn-sm" data-list-retry>重试</button>`);
         });
 }
 
 function renderMonthOptions(months) {
-    const filterMonth = document.getElementById('filterMonth');
-    const currentValue = filterMonth.value;
+    state.months = months || [];
+    const options = ['<option value="">全部月份</option>']
+        .concat(state.months.map(month => `<option value="${escapeHtml(month)}">${escapeHtml(monthLabel(month))}</option>`));
+    el.filterMonth.innerHTML = options.join('');
+    el.filterMonth.value = state.months.includes(state.month) ? state.month : '';
+    state.month = el.filterMonth.value;
+}
 
-    filterMonth.innerHTML = '<option value="">全部月份</option>';
-    months.forEach(month => {
-        const label = `20${escapeHtml(month.slice(0, 2))}年${escapeHtml(month.slice(2, 4))}月`;
-        filterMonth.innerHTML += `<option value="${escapeHtml(month)}">${label}</option>`;
+function renderList(data) {
+    state.rows = data.rows || [];
+    state.total = data.total || 0;
+    state.page = data.page || 1;
+    state.totalPages = data.total_pages || 1;
+    state.q = (data.filters && data.filters.q) || '';
+    state.prefix = (data.filters && data.filters.prefix) || '';
+
+    renderMonthOptions(data.months);
+    el.filterPrefix.value = state.prefix;
+
+    if (!state.rows.length) {
+        setListState(state.total || state.q || state.month || state.prefix
+            ? '没有符合条件的资产 <button type="button" class="btn-secondary btn-sm" data-list-reset>清空筛选</button>'
+            : '暂无资产，先在左侧登记');
+        return;
+    }
+
+    el.assetListContainer.innerHTML = `
+        <div class="table-scroll">
+            <table class="asset-table">
+                <caption class="sr-only">资产台账列表，按编码倒序</caption>
+                <thead>
+                    <tr>
+                        <th scope="col">资产编码</th>
+                        <th scope="col">类型</th>
+                        <th scope="col">规格</th>
+                        <th scope="col">使用部门</th>
+                        <th scope="col">使用人</th>
+                        <th scope="col">状态</th>
+                        <th scope="col"><span class="sr-only">操作</span></th>
+                    </tr>
+                </thead>
+                <tbody>${state.rows.map(renderRow).join('')}</tbody>
+            </table>
+        </div>`;
+    renderPagination();
+}
+
+function renderRow(row) {
+    const icon = brandIcon(row.spec);
+    const iconHtml = icon
+        ? `<img src="${escapeHtml(icon)}" class="brand-icon" alt="" aria-hidden="true" loading="lazy">`
+        : '';
+    const spec = row.spec || '';
+    return `
+        <tr>
+            <td class="cell-number">${iconHtml}<span class="number-text">${escapeHtml(row.number)}</span></td>
+            <td>${escapeHtml(row.type) || '-'}</td>
+            <td class="cell-spec" title="${escapeHtml(spec)}">${escapeHtml(spec) || '-'}</td>
+            <td>${escapeHtml(row.department) || '-'}</td>
+            <td>${escapeHtml(row.name) || '-'}</td>
+            <td>${statusBadgeHtml(row.inv_status)}</td>
+            <td>
+                <button type="button" class="btn-link" data-detail-id="${escapeHtml(String(row.id))}"
+                        aria-label="查看 ${escapeHtml(row.number)} 的详情">详情</button>
+            </td>
+        </tr>`;
+}
+
+function renderPagination() {
+    if (state.totalPages <= 1) {
+        el.listPagination.hidden = true;
+        el.listPagination.innerHTML = '';
+        return;
+    }
+    const page = state.page;
+    const total = state.totalPages;
+    const btn = (label, target, disabled, active) =>
+        `<button type="button" class="page-btn${active ? ' active' : ''}" data-page="${target}"
+            ${disabled ? 'disabled' : ''}${active ? ' aria-current="page"' : ''}>${label}</button>`;
+
+    let start = Math.max(1, page - 2);
+    let end = Math.min(total, start + 4);
+    if (end - start < 4) start = Math.max(1, end - 4);
+
+    const pages = [];
+    for (let i = start; i <= end; i += 1) pages.push(btn(String(i), i, false, i === page));
+
+    el.listPagination.innerHTML = [
+        btn('首页', 1, page === 1, false),
+        btn('上一页', page - 1, page === 1, false),
+        pages.join(''),
+        btn('下一页', page + 1, page === total, false),
+        btn('末页', total, page === total, false),
+        `<span class="page-info">共 ${state.total} 条</span>`,
+    ].join('');
+    el.listPagination.hidden = false;
+}
+
+function resetFilters() {
+    state.month = '';
+    state.prefix = '';
+    state.q = '';
+    state.page = 1;
+    el.searchInput.value = '';
+    el.filterPrefix.value = '';
+    loadList();
+}
+
+function bindList() {
+    const debouncedSearch = debounce(() => {
+        state.q = el.searchInput.value.trim();
+        state.page = 1;
+        loadList();
+    }, 300);
+
+    el.searchInput.addEventListener('input', debouncedSearch);
+    el.filterMonth.addEventListener('change', () => {
+        state.month = el.filterMonth.value;
+        state.page = 1;
+        loadList();
     });
+    el.filterPrefix.addEventListener('change', () => {
+        state.prefix = el.filterPrefix.value;
+        state.page = 1;
+        loadList();
+    });
+    el.refreshAssetList.addEventListener('click', () => loadList());
 
-    if (currentValue && filterMonth.querySelector(`option[value="${currentValue}"]`)) {
-        filterMonth.value = currentValue;
-    } else if (!initialLoadDone) {
-        // 仅首次加载时默认选择最近的月份
-        const sorted = [...months].sort((a, b) => b.localeCompare(a));
-        if (sorted.length > 0) {
-            filterMonth.value = sorted[0];
-            currentMonth = sorted[0];
-            initialLoadDone = true;
-            loadAssetList();
+    // 事件委托：分页 / 详情 / 重试 / 清空筛选
+    document.querySelector('.list-panel').addEventListener('click', (event) => {
+        const target = event.target;
+
+        const pageBtn = target.closest('[data-page]');
+        if (pageBtn && !pageBtn.disabled) {
+            state.page = parseInt(pageBtn.dataset.page, 10);
+            loadList();
             return;
         }
-    }
-}
 
-function renderAssetListByGroup(grouped) {
-    const container = document.getElementById('assetListContainer');
+        const detailBtn = target.closest('[data-detail-id]');
+        if (detailBtn) {
+            openDetail(detailBtn.dataset.detailId);
+            return;
+        }
 
-    if (Object.keys(grouped).length === 0) {
-        container.innerHTML = '<div class="loading-tip">暂无数据</div>';
-        return;
-    }
-
-    let html = '';
-    const sortedMonths = Object.keys(grouped).sort((a, b) => b.localeCompare(a));
-
-    sortedMonths.forEach(month => {
-        const dzAssets = grouped[month]['DZ'] || [];
-        const zlAssets = grouped[month]['ZL'] || [];
-        const monthLabel = `20${escapeHtml(month.slice(0, 2))}年${escapeHtml(month.slice(2, 4))}月`;
-
-        html += `
-            <div class="month-group">
-                <div class="month-title">${monthLabel}</div>
-                <div class="month-content">
-                    <div class="asset-column">
-                        <div class="column-header">DZ 资产 (<span class="count">${dzAssets.length}</span>)</div>
-                        <div class="column-body">
-                            ${renderColumnItems(dzAssets)}
-                        </div>
-                    </div>
-                    <div class="asset-column">
-                        <div class="column-header">ZL 资产 (<span class="count">${zlAssets.length}</span>)</div>
-                        <div class="column-body">
-                            ${renderColumnItems(zlAssets)}
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
-    });
-
-    container.innerHTML = html;
-}
-
-// 根据资产规格返回品牌图标URL
-function getBrandIcon(spec) {
-    if (!spec) return '';
-    const s = spec.toUpperCase();
-    const baseUrl = 'http://192.168.1.101:9001/icon/';
-    if (s.includes('REDMI') || s.includes('XIAOMI')) return baseUrl + 'XIAOMI.webp';
-    if (s.includes('AOC')) return baseUrl + 'AOC.png';
-    if (s.includes('EDY')) return baseUrl + 'EDY.png';
-    if (s.includes('MAC') || s.includes('APPLE')) return baseUrl + 'Apple.png';
-    if (s.includes('LENOVO')) return baseUrl + 'Lenovo.webp';
-    return '';
-}
-
-function renderColumnItems(assets) {
-    if (!assets || assets.length === 0) {
-        return '<div class="empty-column">暂无资产</div>';
-    }
-
-    let html = '<div class="asset-grid">';
-    assets.forEach(item => {
-        const iconUrl = getBrandIcon(item.spec);
-        const iconHtml = iconUrl ? `<img src="${escapeHtml(iconUrl)}" class="brand-icon" alt="brand">` : '';
-        html += `
-            <div class="asset-item" onclick="showAssetDetail(${escapeHtml(String(item.id))})" style="cursor:pointer;">
-                ${iconHtml}
-                <div class="asset-number">${escapeHtml(item.number)}</div>
-                <div class="asset-info">${escapeHtml(item.type) || '-'}</div>
-                <div class="asset-info">${escapeHtml(item.name) || '-'}</div>
-            </div>
-        `;
-    });
-    html += '</div>';
-    return html;
-}
-
-function showAssetDetail(assetId) {
-    // Find the asset data from grouped data
-    const containers = document.querySelectorAll('.asset-item');
-    let assetData = null;
-
-    // Search through all rendered assets to find the one with matching id
-    const allRows = window._assetRows || [];
-    assetData = allRows.find(item => item.id === assetId);
-
-    if (!assetData) {
-        // If not found in cached data, need to fetch
-        fetch(`/api/get_asset_detail?id=${encodeURIComponent(assetId)}`)
-            .then(response => response.json())
-            .then(res => {
-                if (res.status === 'success') {
-                    displayAssetDetailModal(res.data);
-                }
-            })
-            .catch(error => console.error(error));
-        return;
-    }
-
-    displayAssetDetailModal(assetData);
-}
-
-function displayAssetDetailModal(asset) {
-    const modal = document.getElementById('assetDetailModal');
-    const content = document.getElementById('assetDetailContent');
-
-    const iconUrl = getBrandIcon(asset.spec);
-    const iconHtml = iconUrl ? `<img src="${escapeHtml(iconUrl)}" class="detail-brand-icon" alt="brand">` : '';
-
-    let html = `
-        <div style="position:relative;">
-            ${iconHtml}
-            <div class="detail-row">
-                <label>资产编码:</label>
-                <span class="detail-value number">${escapeHtml(asset.number)}</span>
-            </div>
-            <div class="detail-row">
-                <label>资产类型:</label>
-                <span class="detail-value">${escapeHtml(asset.type) || '-'}</span>
-            </div>
-            <div class="detail-row">
-                <label>资产规格:</label>
-                <span class="detail-value">${escapeHtml(asset.spec) || '-'}</span>
-            </div>
-            <div class="detail-row">
-                <label>使用部门:</label>
-                <span class="detail-value">${escapeHtml(asset.department) || '-'}</span>
-            </div>
-            <div class="detail-row">
-                <label>使用人:</label>
-                <span class="detail-value">${escapeHtml(asset.name) || '-'}</span>
-            </div>
-        </div>
-    `;
-
-    // 租聘台式主机显示SN码
-    if (asset.type === '租聘台式主机' && asset.sn) {
-        html += `
-            <div class="detail-row">
-                <label>SN码:</label>
-                <span class="detail-value">${escapeHtml(asset.sn)}</span>
-            </div>
-        `;
-    }
-
-    // 如果有配置信息，显示配置
-    if (asset.cpu || asset.mem || asset.disk || asset.gpu) {
-        html += `
-            <div class="detail-section">
-                <h4>硬件配置</h4>
-                <div class="detail-row">
-                    <label>CPU:</label>
-                    <span class="detail-value">${escapeHtml(asset.cpu) || '-'}</span>
-                </div>
-                <div class="detail-row">
-                    <label>内存:</label>
-                    <span class="detail-value">${escapeHtml(asset.mem) || '-'}</span>
-                </div>
-                <div class="detail-row">
-                    <label>硬盘:</label>
-                    <span class="detail-value">${escapeHtml(asset.disk) || '-'}</span>
-                </div>
-                <div class="detail-row">
-                    <label>显卡:</label>
-                    <span class="detail-value">${escapeHtml(asset.gpu) || '-'}</span>
-                </div>
-            </div>
-        `;
-    }
-
-    content.innerHTML = html;
-    modal.style.display = 'flex';
-}
-
-function bindAssetDetailModal() {
-    const modal = document.getElementById('assetDetailModal');
-    const closeBtn = document.getElementById('closeAssetDetail');
-
-    closeBtn.addEventListener('click', () => {
-        modal.style.display = 'none';
-    });
-
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) {
-            modal.style.display = 'none';
+        if (target.closest('[data-list-retry]')) {
+            loadList();
+            return;
+        }
+        if (target.closest('[data-list-reset]')) {
+            resetFilters();
         }
     });
 }
+
+// ---------- 资产详情 ----------
+function detailRow(label, value, extraClass) {
+    return `<div class="detail-row">
+        <span class="detail-label">${escapeHtml(label)}</span>
+        <span class="detail-value${extraClass ? ` ${extraClass}` : ''}">${escapeHtml(value) || '-'}</span>
+    </div>`;
+}
+
+function renderDetail(asset) {
+    const icon = brandIcon(asset.spec);
+    const iconHtml = icon
+        ? `<img src="${escapeHtml(icon)}" class="detail-brand-icon" alt="" aria-hidden="true">`
+        : '';
+    const parts = [
+        `<div class="detail-head">${iconHtml}
+            <div>
+                <div class="detail-number">${escapeHtml(asset.number)}</div>
+                <div class="detail-sub">${escapeHtml(asset.type) || '-'}${asset.inv_status ? ` · ${escapeHtml(asset.inv_status)}` : ''}</div>
+            </div>
+        </div>`,
+        detailRow('资产规格', asset.spec),
+        detailRow('使用部门', asset.department),
+        detailRow('使用人', asset.name),
+    ];
+
+    if (asset.sn) parts.push(detailRow('SN 码', asset.sn));
+
+    const hardware = [['CPU', asset.cpu], ['内存', asset.mem], ['硬盘', asset.disk], ['显卡', asset.gpu]]
+        .filter(([, value]) => value);
+    if (hardware.length) {
+        parts.push('<div class="detail-section"><h4>硬件配置</h4>'
+            + hardware.map(([label, value]) => detailRow(label, value)).join('')
+            + '</div>');
+    }
+
+    if (asset.inv_tag || asset.inv_date) {
+        parts.push('<div class="detail-section"><h4>最近流转</h4>'
+            + detailRow('流转标签', asset.inv_tag)
+            + detailRow('流转日期', asset.inv_date)
+            + '</div>');
+    }
+
+    el.assetDetailContent.innerHTML = parts.join('');
+    openModal(el.assetDetailModal);
+}
+
+function openDetail(assetId) {
+    // 列表行已是台账派生口径（部门 / 使用人 / 状态由 inventory 最新记录覆盖），
+    // 直接复用同一份数据，避免「缓存命中」与「走接口」两条路径口径不一致
+    const row = state.rows.find(item => String(item.id) === String(assetId));
+    if (row) {
+        renderDetail(row);
+        return;
+    }
+    fetch(`/api/get_asset_detail?id=${encodeURIComponent(assetId)}`)
+        .then(response => response.json())
+        .then(res => {
+            if (res.status === 'success') {
+                renderDetail(res.data);
+            } else {
+                showListMessage(res.message || '资产详情加载失败', 'error');
+            }
+        })
+        .catch(error => {
+            console.error(error);
+            showListMessage('资产详情加载失败，请重试', 'error');
+        });
+}
+
+// ---------- 初始化 ----------
+function init() {
+    cacheElements();
+    buildYearMonthOptions();
+    setYearMonth(currentMonthValue());
+    bindForm();
+    bindList();
+    // 详情弹窗只允许点右上角关闭按钮：遮罩点击 / Esc 都不关
+    initModal(el.assetDetailModal, { closeOnBackdrop: false, closeOnEsc: false });
+    applyTypeUi();
+
+    // 图标地址就位后再渲染列表，避免图标二次重排
+    loadMeta().then(() => loadList());
+}
+
+document.addEventListener('DOMContentLoaded', init);

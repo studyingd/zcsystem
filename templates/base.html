@@ -5,40 +5,143 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}资产管理系统{% endblock %}</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <link rel="stylesheet" href="/static/css/index.css">
+    <link rel="stylesheet" href="/static/css/index.css?v=24">
     {% block extra_css %}{% endblock %}
 </head>
 
 <body>
-    <div class="container page-enter">
-        <div class="header">
-            <h1>资产管理系统</h1>
-            <div class="header-nav">
-                <a href="/dashboard" class="nav-link {% if active_nav == 'dashboard' %}active{% endif %}">资产看板</a>
-                {% if logged_in %}
-                <a href="/asset_change" class="nav-link {% if active_nav == 'asset_change' %}active{% endif %}">资产变更</a>
-                <a href="/asset_register" class="nav-link {% if active_nav == 'asset_register' %}active{% endif %}">资产登记</a>
-                <a href="/vpn" class="nav-link {% if active_nav == 'vpn' %}active{% endif %}">VPN记录</a>
-                <a href="/export?order=desc" class="export-icon" title="导出数据">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                        <polyline points="7 10 12 15 17 10"></polyline>
-                        <line x1="12" y1="15" x2="12" y2="3"></line>
-                    </svg>
-                </a>
-                {% else %}
-                <a href="/login" class="nav-link">登录</a>
-                {% endif %}
-            </div>
-        </div>
+    <script>
+    // 尽早恢复桌面端侧边栏折叠状态，避免首屏闪动（默认收起：仅记录 '0' 时展开）
+    (function () {
+        try {
+            if (localStorage.getItem('zc-sidebar-collapsed') !== '0' && window.innerWidth > 1024) {
+                document.body.classList.add('sidebar-collapsed');
+            }
+        } catch (e) { /* localStorage 不可用时忽略 */ }
+    })();
+    </script>
+    <a class="skip-link" href="#main-content">跳到主内容</a>
 
-        {% block content %}{% endblock %}
+    <div class="app-shell">
+        <!-- ============ 左侧侧边导航 ============ -->
+        <aside class="app-sidebar" id="appSidebar" aria-label="主导航">
+            <div class="sidebar-brand">
+                <span class="sidebar-logo" aria-hidden="true">
+                    <!-- 品牌标记：资产标签（与 favicon.svg 同源） -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"></path>
+                        <circle cx="7.5" cy="7.5" r="1"></circle>
+                    </svg>
+                </span>
+                <span class="sidebar-title">资产管理系统</span>
+            </div>
+
+            <nav class="sidebar-nav">
+                <span class="sidebar-section">工作台</span>
+                <a href="/dashboard" class="nav-link {% if active_nav == 'dashboard' %}active{% endif %}" title="资产看板" {% if active_nav == 'dashboard' %}aria-current="page"{% endif %}>
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <rect x="3" y="3" width="7" height="9" rx="1"></rect>
+                        <rect x="14" y="3" width="7" height="5" rx="1"></rect>
+                        <rect x="14" y="12" width="7" height="9" rx="1"></rect>
+                        <rect x="3" y="16" width="7" height="5" rx="1"></rect>
+                    </svg>
+                    <span>资产看板</span>
+                </a>
+                {% if logged_in %}
+                <a href="/asset_register" class="nav-link {% if active_nav == 'asset_register' %}active{% endif %}" title="资产登记" {% if active_nav == 'asset_register' %}aria-current="page"{% endif %}>
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <rect x="8" y="2" width="8" height="4" rx="1"></rect>
+                        <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+                        <path d="M12 11v6"></path>
+                        <path d="M9 14h6"></path>
+                    </svg>
+                    <span>资产登记</span>
+                </a>
+                <a href="/asset_change" class="nav-link {% if active_nav == 'asset_change' %}active{% endif %}" title="资产变更" {% if active_nav == 'asset_change' %}aria-current="page"{% endif %}>
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M8 3 4 7l4 4"></path>
+                        <path d="M4 7h16"></path>
+                        <path d="m16 21 4-4-4-4"></path>
+                        <path d="M20 17H4"></path>
+                    </svg>
+                    <span>资产变更</span>
+                </a>
+                {% endif %}
+            </nav>
+
+            <div class="sidebar-footer">
+                {% if logged_in %}
+                <div class="sidebar-user">
+                    <span class="sidebar-avatar" aria-hidden="true">{{ (session.get('username') or 'U')[:1] | upper }}</span>
+                    <span class="sidebar-username">{{ session.get('username') }}</span>
+                    <form action="/logout" method="post" class="sidebar-logout-form">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="sidebar-logout" title="退出登录" aria-label="退出登录">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                                <path d="m16 17 5-5-5-5"></path>
+                                <path d="M21 12H9"></path>
+                            </svg>
+                        </button>
+                    </form>
+                </div>
+                {% else %}
+                <a href="/login" class="nav-link {% if active_nav == 'login' %}active{% endif %}" title="登录" {% if active_nav == 'login' %}aria-current="page"{% endif %}>
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
+                        <path d="m10 17 5-5-5-5"></path>
+                        <path d="M15 12H3"></path>
+                    </svg>
+                    <span>登录</span>
+                </a>
+                {% endif %}
+                <span class="sidebar-version">Asset Management v2.0</span>
+            </div>
+        </aside>
+        <div class="sidebar-backdrop" id="sidebarBackdrop" hidden></div>
+
+        <!-- ============ 主区域 ============ -->
+        <div class="app-main">
+            <header class="app-topbar">
+                <button type="button" class="sidebar-toggle" id="sidebarToggle" aria-label="收起导航栏" aria-expanded="true" aria-controls="appSidebar">
+                    <svg class="icon-menu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                        <path d="M4 6h16"></path>
+                        <path d="M4 12h16"></path>
+                        <path d="M4 18h16"></path>
+                    </svg>
+                    <svg class="icon-collapse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="m11 17-5-5 5-5"></path>
+                        <path d="m18 17-5-5 5-5"></path>
+                    </svg>
+                </button>
+                <h1 class="topbar-title">{% block page_title %}资产管理系统{% endblock %}</h1>
+                <div class="topbar-actions">
+                    {% if logged_in %}
+                    <a href="/export?order=desc" class="topbar-action-btn" title="导出数据" aria-label="导出 Excel 数据">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="7 10 12 15 17 10"></polyline>
+                            <line x1="12" y1="15" x2="12" y2="3"></line>
+                        </svg>
+                        <span>导出</span>
+                    </a>
+                    {% endif %}
+                </div>
+            </header>
+
+            <main id="main-content" class="container page-enter">
+                {% block content %}{% endblock %}
+            </main>
+        </div>
     </div>
 
     {% block modals %}{% endblock %}
 
-    <script src="/static/js/utils.js"></script>
+    <script type="application/json" id="zcMeta">{{ zc_meta | tojson }}</script>
+    <script src="/static/js/utils.js?v=3"></script>
+    <script src="/static/js/modal.js?v=2"></script>
     <script>
     // 全局 fetch 封装：POST/PUT/DELETE 请求自动携带 CSRF token，统一处理 session 过期
     const _originalFetch = window.fetch;
@@ -70,18 +173,86 @@
     </script>
     {% block extra_js %}{% endblock %}
     <script>
-    document.querySelectorAll('.nav-link').forEach(link => {
-        link.addEventListener('click', function(e) {
-            e.preventDefault();
-            const href = this.href;
-            const container = document.querySelector('.container');
-            container.classList.remove('page-enter');
-            container.classList.add('page-exit');
-            container.addEventListener('animationend', () => {
-                window.location.href = href;
-            }, { once: true });
+    // 侧边导航：桌面端折叠为图标栏 / 窄屏抽屉开关 + 页面切换过渡
+    (function () {
+        const backdrop = document.getElementById('sidebarBackdrop');
+        const toggle = document.getElementById('sidebarToggle');
+        const COLLAPSE_KEY = 'zc-sidebar-collapsed';
+        const isDesktop = () => window.innerWidth > 1024;
+
+        function readCollapsed() {
+            // 默认收起：仅当记录为 '0'（用户明确展开过）才展开
+            try { return localStorage.getItem(COLLAPSE_KEY) !== '0'; } catch (e) { return true; }
+        }
+
+        function writeCollapsed(collapsed) {
+            try { localStorage.setItem(COLLAPSE_KEY, collapsed ? '1' : '0'); } catch (e) { /* 隐私模式下忽略 */ }
+        }
+
+        function syncToggle() {
+            const collapsed = document.body.classList.contains('sidebar-collapsed');
+            const drawerOpen = document.body.classList.contains('sidebar-open');
+            const label = isDesktop()
+                ? (collapsed ? '展开导航栏' : '收起导航栏')
+                : (drawerOpen ? '关闭导航菜单' : '打开导航菜单');
+            toggle.setAttribute('aria-expanded', String(isDesktop() ? !collapsed : drawerOpen));
+            toggle.setAttribute('aria-label', label);
+            toggle.title = label;
+        }
+
+        function setDrawerOpen(open) {
+            document.body.classList.toggle('sidebar-open', open);
+            backdrop.hidden = !open;
+            syncToggle();
+        }
+
+        function setCollapsed(collapsed) {
+            document.body.classList.toggle('sidebar-collapsed', collapsed);
+            syncToggle();
+        }
+
+        toggle.addEventListener('click', () => {
+            if (isDesktop()) {
+                const next = !document.body.classList.contains('sidebar-collapsed');
+                setCollapsed(next);
+                writeCollapsed(next);
+            } else {
+                setDrawerOpen(!document.body.classList.contains('sidebar-open'));
+            }
         });
-    });
+
+        backdrop.addEventListener('click', () => setDrawerOpen(false));
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && document.body.classList.contains('sidebar-open')) setDrawerOpen(false);
+        });
+
+        window.addEventListener('resize', () => {
+            if (isDesktop()) {
+                if (document.body.classList.contains('sidebar-open')) setDrawerOpen(false);
+                setCollapsed(readCollapsed());
+            } else {
+                document.body.classList.remove('sidebar-collapsed');
+                syncToggle();
+            }
+        });
+
+        setCollapsed(isDesktop() && readCollapsed());
+
+        document.querySelectorAll('.sidebar-nav .nav-link').forEach(link => {
+            link.addEventListener('click', function (e) {
+                e.preventDefault();
+                const href = this.href;
+                if (document.body.classList.contains('sidebar-open')) setDrawerOpen(false);
+                const container = document.getElementById('main-content');
+                container.classList.remove('page-enter');
+                container.classList.add('page-exit');
+                container.addEventListener('animationend', () => {
+                    window.location.href = href;
+                }, { once: true });
+            });
+        });
+    })();
     </script>
 </body>
 

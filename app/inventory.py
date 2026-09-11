@@ -5,6 +5,7 @@ import io
 import uuid
 import logging
 from .config import get_db_connection, get_s3_client, S3_EXTERNAL_URL
+from .ledger import INVENTORY_STATUSES
 
 inv_bp = Blueprint('inventory', __name__)
 logger = logging.getLogger(__name__)
@@ -60,7 +61,7 @@ def insert_record():
     if not all([number, department, site, type_val, date_val, status_val]):
         return jsonify({'status': 'error', 'message': '资产编码、使用部门、使用人、资产类型、发放日期 和 资产状态 均不能为空'}), 400
 
-    valid_statuses = {'已录入', '未录入', '无需录入', '租聘', '借用', '入库', '报废'}
+    valid_statuses = INVENTORY_STATUSES
     if status_val not in valid_statuses:
         return jsonify({'status': 'error', 'message': '资产状态 值不合法'}), 400
 
@@ -344,7 +345,7 @@ def update_record():
     if not all([id_val, number, department, site, type_val, date_val, status_val]):
         return jsonify({'status': 'error', 'message': 'ID、资产编码、使用部门、使用人、资产类型、发放日期 和 资产状态 均不能为空'}), 400
 
-    valid_statuses = {'已录入', '未录入', '无需录入', '租聘', '借用', '入库', '报废'}
+    valid_statuses = INVENTORY_STATUSES
     if status_val not in valid_statuses:
         return jsonify({'status': 'error', 'message': '资产状态 值不合法'}), 400
 
@@ -356,6 +357,19 @@ def update_record():
     try:
         cursor.execute("SELECT * FROM inventory WHERE id = %s", (id_val,))
         old_data = cursor.fetchone()
+
+        # 详情弹窗对「只存在于 device_list 的资产」会带出 device_list.id，
+        # 它与 inventory.id 同号时会误伤无关记录，这里统一按资产编码重新定位。
+        if old_data and old_data.get('number') != number:
+            logger.warning("inventory id=%s 属于资产 %s，与提交的 %s 不一致，改按编码定位",
+                           id_val, old_data.get('number'), number)
+            old_data = None
+        if not old_data:
+            cursor.execute(
+                "SELECT * FROM inventory WHERE number = %s ORDER BY datetime DESC, id DESC LIMIT 1",
+                (number,)
+            )
+            old_data = cursor.fetchone()
 
         if not old_data:
             cursor.execute("SELECT * FROM device_list WHERE number = %s", (number,))
@@ -505,7 +519,7 @@ def update_history_record():
     if not all([tmp_id, number, department, site, type_val, date_val, status_val]):
         return jsonify({'status': 'error', 'message': '历史记录ID、资产编码、使用部门、使用人、资产类型、发放日期 和 资产状态 均不能为空'}), 400
 
-    valid_statuses = {'已录入', '未录入', '无需录入', '租聘', '借用', '入库', '报废'}
+    valid_statuses = INVENTORY_STATUSES
     if status_val not in valid_statuses:
         return jsonify({'status': 'error', 'message': '资产状态 值不合法'}), 400
 
@@ -669,7 +683,7 @@ def status_counts():
         total = 0
         for r in rows:
             status_val = r['status'].strip() if r['status'] and r['status'].strip() else '无状态'
-            if status_val not in ('已录入', '未录入', '租聘', '借用', '入库', '无需录入', '报废'):
+            if status_val not in INVENTORY_STATUSES:
                 status_val = '无状态'
             counts[status_val] = counts.get(status_val, 0) + r['cnt']
             total += r['cnt']
@@ -704,7 +718,7 @@ def list_by_status():
 
     cursor = conn.cursor(dictionary=True)
     try:
-        valid_statuses = ('已录入', '未录入', '租聘', '借用', '入库', '无需录入', '报废')
+        valid_statuses = INVENTORY_STATUSES
 
         if status_val == 'all':
             where = ''

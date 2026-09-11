@@ -2,54 +2,179 @@
 
 {% block title %}资产管理系统 - 资产看板{% endblock %}
 
+{% block page_title %}资产看板{% endblock %}
+
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/dashboard.css?v=8">
+<link rel="stylesheet" href="/static/css/dashboard.css?v=24">
 {% endblock %}
 
 {% block content %}
 <div class="module">
-    <h2>资产看板</h2>
-    <div class="dashboard-month-picker">
-        <input type="date" id="dashboardStart">
-        <span class="range-sep">~</span>
-        <input type="date" id="dashboardEnd">
-        <button type="button" id="lastMonthBtn" class="month-quick-btn">上个月</button>
-        <button type="button" id="nextMonthBtn" class="month-quick-btn">下个月</button>
+
+    <div class="dash-toolbar">
+        <div class="dash-toolbar-head">
+            <h2>资产申请单据</h2>
+            <p class="dash-toolbar-hint">点击单据编号可下推生成当月资产卡片；点击「今年已采购」可下钻各部门使用情况与使用人。「预算剩余 / 今年已采购 / 剩余库存」均为截至单据日期（含本单）的口径，预算执行总览见「预算设置」；「部门领用总览」查看各部门 × 各类型当前领用矩阵，并可下钻入职 / 领用 / 更换明细。</p>
+        </div>
+        <div class="dash-toolbar-actions">
+            <button type="button" id="deptUsageBtn" class="dash-tool-btn">部门领用总览</button>
+            <button type="button" id="budgetBtn" class="dash-tool-btn admin-only" style="display:none;">预算设置</button>
+            <button type="button" id="newOrderBtn" class="dash-tool-btn primary admin-only" style="display:none;">+ 新增单据</button>
+        </div>
     </div>
 
-    <h3 class="section-title" id="sectionPurchase">实际采购数量</h3>
-    <div id="purchaseCards" class="dashboard-grid"></div>
+    <div class="order-toolbar">
+        <div class="query-group">
+            <label for="filterYear">年度</label>
+            <select id="filterYear"></select>
+        </div>
+        <div class="query-group">
+            <label for="filterType">设备类型</label>
+            <select id="filterType"><option value="">全部类型</option></select>
+        </div>
+        <div class="query-group">
+            <label for="filterBudget">预算</label>
+            <select id="filterBudget">
+                <option value="">全部</option>
+                <option value="1">预算内</option>
+                <option value="0">预算外</option>
+            </select>
+        </div>
+        <div class="query-group">
+            <label for="filterPushed">下推</label>
+            <select id="filterPushed">
+                <option value="">全部</option>
+                <option value="1">已下推</option>
+                <option value="0">未下推</option>
+            </select>
+        </div>
+        <div class="query-group">
+            <label for="filterReview">审核</label>
+            <!-- 默认只看未审核：审核过的单据切「已审核」或「全部」查看 -->
+            <select id="filterReview">
+                <option value="0" selected>未审核</option>
+                <option value="1">已审核</option>
+                <option value="">全部</option>
+            </select>
+        </div>
+        <div class="query-group">
+            <label for="filterKeyword">关键词</label>
+            <input type="text" id="filterKeyword" placeholder="单据编号/规格/供应商">
+        </div>
+        <div class="query-group">
+            <button type="button" id="orderSearchBtn">查询</button>
+            <button type="button" id="orderResetBtn" class="btn-plain">重置</button>
+        </div>
+    </div>
 
-    <h3 class="section-title" id="sectionStock">当前库存</h3>
-    <div id="stockCards" class="dashboard-grid"></div>
+    <div id="orderSummary" class="order-summary"></div>
 
-    <h3 class="section-title" id="sectionMetric">资产领用</h3>
-    <div id="metricCards" class="dashboard-grid"></div>
+    <div class="order-table-wrap">
+        <table class="data-table order-table">
+            <thead>
+                <tr>
+                    <th>单据编号</th>
+                    <th>单据日期</th>
+                    <th>设备类型</th>
+                    <th>规格型号</th>
+                    <th class="num">申请数量</th>
+                    <th class="num">金额（元）</th>
+                    <th>预算内外</th>
+                    <th>预算剩余情况</th>
+                    <th class="num">今年已采购</th>
+                    <th class="num">剩余库存</th>
+                    <th>下推状态</th>
+                    <th>审核状态</th>
+                </tr>
+            </thead>
+            <tbody id="orderTableBody">
+                <tr><td colspan="12" class="table-loading">加载中...</td></tr>
+            </tbody>
+        </table>
+    </div>
 </div>
 {% endblock %}
 
 {% block modals %}
-<!-- 明细弹窗 -->
-<div class="custom-modal" id="detailModal" style="display:none;">
-    <div class="modal-content detail-modal-content">
+<!-- 单据详情 + 资产卡片 -->
+<div class="custom-modal" id="orderDetailModal" style="display:none;">
+    <div class="modal-content wide-modal-content">
         <div class="modal-header-bar">
-            <span class="modal-header-title" id="detailTitle"></span>
-            <button class="modal-close-btn" id="detailClose">&times;</button>
+            <span class="modal-header-title" id="orderDetailTitle">单据详情</span>
+            <button class="modal-close-btn" data-close="orderDetailModal" aria-label="关闭">&times;</button>
         </div>
-        <div id="detailFilters" style="display:none;">
-            <div class="detail-filter-row">
-                <label>部门筛选：</label>
-                <select id="filterDept"><option value="">全部部门</option></select>
-                <label>标签筛选：</label>
-                <select id="filterTag"><option value="">全部标签</option></select>
-            </div>
+        <div id="orderDetailBody" class="wide-modal-body"></div>
+    </div>
+</div>
+
+<!-- 部门领用总览：部门 × 类型矩阵 -> 入职/领用/更换明细 -->
+<div class="custom-modal" id="deptUsageModal" style="display:none;">
+    <div class="modal-content wide-modal-content">
+        <div class="modal-header-bar">
+            <span class="modal-header-title" id="deptUsageTitle">部门领用总览</span>
+            <button class="modal-close-btn" data-close="deptUsageModal" aria-label="关闭">&times;</button>
         </div>
-        <div id="detailCards" class="query-card-list detail-card-list"></div>
+        <div id="deptUsageBody" class="wide-modal-body"></div>
+    </div>
+</div>
+
+<!-- 资产档案详情：设备配置 + 流转历史（从部门领用总览的资产编码进入） -->
+<div class="custom-modal" id="assetFullModal" style="display:none;">
+    <div class="modal-content wide-modal-content">
+        <div class="modal-header-bar">
+            <span class="modal-header-title" id="assetFullTitle">资产详情</span>
+            <button class="modal-close-btn" data-close="assetFullModal" aria-label="关闭">&times;</button>
+        </div>
+        <div id="assetFullBody" class="wide-modal-body"></div>
+    </div>
+</div>
+
+<!-- 今年已采购下钻：部门使用情况 -> 使用人明细 -->
+<div class="custom-modal" id="usageModal" style="display:none;">
+    <div class="modal-content wide-modal-content">
+        <div class="modal-header-bar">
+            <span class="modal-header-title" id="usageTitle">部门使用情况</span>
+            <button class="modal-close-btn" data-close="usageModal" aria-label="关闭">&times;</button>
+        </div>
+        <div id="usageBody" class="wide-modal-body"></div>
+    </div>
+</div>
+
+<!-- 单据新增/编辑 -->
+<div class="custom-modal" id="orderFormModal" style="display:none;">
+    <div class="modal-content form-modal-content">
+        <div class="modal-header-bar">
+            <span class="modal-header-title" id="orderFormTitle">新增单据</span>
+        </div>
+        <div id="orderFormBody"></div>
+    </div>
+</div>
+
+<!-- 资产卡片编辑 -->
+<div class="custom-modal" id="cardFormModal" style="display:none;">
+    <div class="modal-content form-modal-content">
+        <div class="modal-header-bar">
+            <span class="modal-header-title" id="cardFormTitle">编辑资产卡片</span>
+        </div>
+        <div id="cardFormBody"></div>
+    </div>
+</div>
+
+<!-- 预算设置 -->
+<div class="custom-modal" id="budgetModal" style="display:none;">
+    <div class="modal-content wide-modal-content">
+        <div class="modal-header-bar">
+            <span class="modal-header-title">年度预算设置</span>
+            <button class="modal-close-btn" data-close="budgetModal" aria-label="关闭">&times;</button>
+        </div>
+        <div id="budgetBody" class="wide-modal-body"></div>
     </div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
-<script>var DASHBOARD_ADMIN = {{ admin | tojson }};</script>
-<script src="/static/js/dashboard.js?v=14"></script>
+<script>
+var DASHBOARD_ADMIN = {{ admin | tojson }};
+</script>
+<script src="/static/js/dashboard_orders.js?v=23"></script>
 {% endblock %}

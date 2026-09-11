@@ -43,7 +43,8 @@ function loadStatusCounts() {
 function renderOverviewCards() {
     const container = document.getElementById('overviewCards');
 
-    const statusOrder = ['已录入', '未录入', '租聘', '借用', '入库', '无需录入', '报废', '无状态'];
+    // 卡片顺序跟随后端词表，末尾补上台账里没有流转记录的「无状态」
+    const statusOrder = [...STATUS_OPTIONS, '无状态'];
     const statusColors = {
         '已录入': '#28a745',
         '未录入': '#ffc107',
@@ -619,20 +620,8 @@ function bindQueryBtn() {
 }
 
 
-// 状态选项列表
-const STATUS_OPTIONS = ['已录入', '未录入', '租聘', '借用', '入库', '无需录入', '报废'];
-
-// 标签选项列表
-const TAG_OPTIONS = ['入职', '领用', '更换', '离职', '入库', '弃用'];
-
-// 部门选项使用 utils.js 中的 DEPARTMENTS
-
-// 状态样式映射
-function getStatusClass(status) {
-    if (status === '已录入') return 'status-done';
-    if (['未录入', '租聘', '借用', '入库'].includes(status)) return 'status-pending';
-    return 'status-none';
-}
+// 状态 / 标签词表与徽章样式已上移到 utils.js（STATUS_OPTIONS / TAG_OPTIONS / getStatusClass），
+// 词表由后端 #zcMeta 下发；部门选项同样使用 utils.js 的 DEPARTMENTS，避免各页各写一份
 
 // 收集详情表单当前值并提交更新
 function submitDetailUpdate(form, id, overrides) {
@@ -675,8 +664,54 @@ window.showQueryDetail = function(cardEl) {
                 alert(res.message || '获取详情失败');
                 return;
             }
-            const { basic, hardware, history } = res.data;
-            const body = document.getElementById('queryDetailBody');
+            const data = res.data || {};
+            DETAIL_DATA = {
+                basic: data.basic || {},
+                hardware: data.hardware || {},
+                history: data.history || []
+            };
+            renderDetailView();
+            document.getElementById('queryDetailModal').style.display = 'flex';
+        });
+};
+
+let DETAIL_DATA = null;
+
+const ICON_PENCIL = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10.5 2.5l3 3L5 14H2v-3L10.5 2.5z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const ICON_TRASH = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M5.33 4V2.67a1.33 1.33 0 011.34-1.34h2.66a1.33 1.33 0 011.34 1.34V4m2 0v9.33a1.33 1.33 0 01-1.34 1.34H4.67a1.33 1.33 0 01-1.34-1.34V4h9.34z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const ICON_CHECK = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M13.5 3.5l-9 9L2 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const ICON_CLOSE = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+const SPINNER = '<span class="dv-spinner" aria-hidden="true"></span>';
+
+// 状态 / 标签切换区：查看态与编辑态共用同一套组件，两种模式观感保持一致
+function detailTogglesHtml(editable) {
+    const { basic } = DETAIL_DATA;
+    const curStatus = basic.status || '';
+    const curTag = basic.tag || '';
+    const chip = (attr, value, active, tip) =>
+        `<span class="status-toggle${active ? ' active' : ''}" ${attr}="${escapeHtml(value)}" role="button" tabindex="0" title="${escapeHtml(tip)}">${escapeHtml(value)}</span>`;
+    return `<div class="detail-toggle-row">
+                <div class="detail-toggle-col">
+                    <label>资产状态:<span class="toggle-hint">点击切换</span></label>
+                    <div class="status-toggles" data-group="status">
+                        ${editable ? `<input type="hidden" name="status" value="${escapeHtml(curStatus)}">` : ''}
+                        ${STATUS_OPTIONS.map(s => chip('data-status', s, s === curStatus, `点击切换为「${s}」`)).join('')}
+                    </div>
+                </div>
+                <div class="detail-toggle-col">
+                    <label>资产标签:<span class="toggle-hint">点击切换</span></label>
+                    <div class="status-toggles" data-group="tag">
+                        ${editable ? `<input type="hidden" name="tag" value="${escapeHtml(curTag)}">` : ''}
+                        ${TAG_OPTIONS.map(t => chip('data-tag', t, t === curTag, t === curTag ? '点击取消该标签' : `点击设为「${t}」`)).join('')}
+                    </div>
+                </div>
+            </div>`;
+}
+
+function detailEditHtml() {
+    const { basic, hardware, history } = DETAIL_DATA;
+    const isRented = (basic.type || '') === '租聘台式主机';
+    const isComputer = ['笔记本电脑', '台式主机', '租聘台式主机'].includes((hardware && hardware.type) || basic.type || '');
 
             // 区块1：资产详情
             let html = `<div class="detail-form" data-id="${escapeHtml(basic.id)}" data-number="${escapeHtml(basic.number)}" data-source="${escapeHtml(basic.source)}">`;
@@ -706,6 +741,7 @@ window.showQueryDetail = function(cardEl) {
                         <span class="detail-value">
                             <select class="edit-input" name="department" disabled>
                                 ${DEPARTMENTS.map(o => `<option value="${escapeHtml(o.value)}" ${basic.department === o.value ? 'selected' : ''}>${escapeHtml(o.text)}</option>`).join('')}
+                                ${basic.department && !DEPARTMENTS.some(o => o.value === basic.department) ? `<option value="${escapeHtml(basic.department)}" selected>${escapeHtml(basic.department)}</option>` : ''}
                             </select>
                         </span>
                     </div>
@@ -718,53 +754,36 @@ window.showQueryDetail = function(cardEl) {
                         <span class="detail-value"><input type="date" class="edit-input" name="datetime" value="${escapeHtml(basic.datetime || '')}" disabled></span>
                     </div>
                     <div class="detail-basic-item">
-                        <label>${(basic.type || '') === '租聘台式主机' ? 'SN码:' : '资产规格:'}</label>
-                        <span class="detail-value"><input type="text" class="edit-input" value="${escapeHtml((basic.type || '') === '租聘台式主机' ? (hardware?.sn || '') : (hardware?.spec || ''))}" disabled></span>
+                        <label>资产规格:</label>
+                        <span class="detail-value"><input type="text" class="edit-input" title="${escapeHtml(hardware?.spec || '')}" value="${escapeHtml(hardware?.spec || '')}" disabled></span>
                     </div>
-                    <div class="detail-basic-item">
+                    ${isRented ? `<div class="detail-basic-item">
+                        <label>SN码:</label>
+                        <span class="detail-value"><input type="text" class="edit-input" title="${escapeHtml(hardware?.sn || '')}" value="${escapeHtml(hardware?.sn || '')}" disabled></span>
+                    </div>` : ''}
+                    <div class="detail-basic-item${isRented ? '' : ' wide'}">
                         <label>备注信息:</label>
                         <span class="detail-value"><textarea class="edit-input" name="notice" rows="1" disabled>${escapeHtml(basic.notice || '')}</textarea></span>
                     </div>
                 </div>
-                <div style="margin-top:12px;">
-                    <label style="font-size:13px;color:#6c757d;font-weight:500;">资产状态:</label>
-                    <div class="status-toggles">
-                        <input type="hidden" name="status" value="${escapeHtml(basic.status || '')}">
-                        ${STATUS_OPTIONS.map(s => `<span class="status-toggle${basic.status === s ? ' active' : ''}" data-status="${s}">${s}</span>`).join('')}
-                    </div>
-                </div>
-                <div style="margin-top:12px;">
-                    <label style="font-size:13px;color:#6c757d;font-weight:500;">资产标签:</label>
-                    <div class="status-toggles">
-                        <input type="hidden" name="tag" value="${escapeHtml(basic.tag || '')}">
-                        ${TAG_OPTIONS.map(t => `<span class="status-toggle${basic.tag === t ? ' active' : ''}" data-tag="${t}">${t}</span>`).join('')}
-                    </div>
-                </div>
+                ${detailTogglesHtml(true)}
             </div>`;
 
             // 区块2：硬件配置
-            html += `<div class="detail-section">
-                <div class="detail-section-title">硬件配置</div>`;
-            if (hardware) {
-                const assetType = hardware.type || basic.type || '';
-                if (['笔记本电脑', '台式主机', '租聘台式主机'].includes(assetType)) {
-                    if (hardware.cpu || hardware.mem || hardware.disk || hardware.gpu) {
-                        html += `<div class="hardware-grid">
-                            <div class="hardware-item"><label>CPU:</label><span class="hw-value">${escapeHtml(hardware.cpu || '-')}</span></div>
-                            <div class="hardware-item"><label>内存:</label><span class="hw-value">${escapeHtml(hardware.mem || '-')}</span></div>
-                            <div class="hardware-item"><label>硬盘:</label><span class="hw-value">${escapeHtml(hardware.disk || '-')}</span></div>
-                            <div class="hardware-item"><label>显卡:</label><span class="hw-value">${escapeHtml(hardware.gpu || '-')}</span></div>
-                        </div>`;
-                    } else {
-                        html += `<div class="hardware-empty">暂无硬件配置信息</div>`;
-                    }
+            // 显示器等非电脑类型没有硬件字段，整块隐藏
+            if (isComputer) {
+                html += `<div class="detail-section">
+                    <div class="detail-section-title">硬件配置</div>`;
+                const hw = hardware || {};
+                const hwItems = [['CPU', hw.cpu], ['内存', hw.mem], ['硬盘', hw.disk], ['显卡', hw.gpu]];
+                if (hwItems.some(([, v]) => v)) {
+                    html += `<div class="hardware-grid">` + hwItems.map(([label, v]) =>
+                        `<div class="hardware-item"><label>${label}:</label><span class="hw-value">${escapeHtml(v || '-')}</span></div>`).join('') + `</div>`;
                 } else {
-                    html += `<div class="hardware-empty">该类型无硬件配置信息</div>`;
+                    html += `<div class="hardware-empty">暂无硬件配置信息</div>`;
                 }
-            } else {
-                html += `<div class="hardware-empty">暂无硬件配置信息</div>`;
+                html += `</div>`;
             }
-            html += `</div>`;
 
             // 区块3：历史数据
             html += `<div class="detail-section">
@@ -777,7 +796,7 @@ window.showQueryDetail = function(cardEl) {
                         <div class="history-line"></div>
                         <div class="history-content">
                             <span class="history-date">${escapeHtml(h.datetime || '未知日期')}</span>
-                            <span class="history-info">${escapeHtml(h.department || '-')} - ${escapeHtml(h.site || '-')}</span>
+                            <span class="history-info">${escapeHtml(h.department || '-')} - ${escapeHtml(h.site || '-')}${h.tag ? ` · ${escapeHtml(h.tag)}` : ''}${h.status ? ` · ${escapeHtml(h.status)}` : ''}</span>
                             <button class="history-delete-btn" title="删除此条历史记录" style="display:none;">
                                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" fill="#dc3545"/><line x1="4.5" y1="8" x2="11.5" y2="8" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/></svg>
                             </button>
@@ -814,16 +833,224 @@ window.showQueryDetail = function(cardEl) {
                 </div>
             </div>`;
 
-            html += `</div>`; // close detail-form
+    html += `</div>`; // close detail-form
+    return html;
+}
 
-            body.innerHTML = html;
+function detailViewHtml() {
+    const { basic, hardware, history } = DETAIL_DATA;
+    const hw = hardware || {};
+    // 只读态沿用编辑态的 label + value 排版，两种模式切换时视觉不跳变
+    const val = (v, isMono) => {
+        const has = v !== '' && v !== null && v !== undefined;
+        if (!has) return '<span class="dv-empty">—</span>';
+        return isMono ? `<span class="dv-mono">${escapeHtml(v)}</span>` : escapeHtml(v);
+    };
+    const item = (label, valueHtml, tip, wide) => `<div class="detail-basic-item${wide ? ' wide' : ''}">
+                        <label>${label}:</label>
+                        <span class="detail-value"${tip ? ` title="${escapeHtml(tip)}"` : ''}>${valueHtml}</span>
+                    </div>`;
 
-            // 绑定编辑/删除按钮
-            bindDetailActions();
+    const assetType = hw.type || basic.type || '';
+    const isComputer = ['笔记本电脑', '台式主机', '租聘台式主机'].includes(assetType);
+    const isRented = (basic.type || '') === '租聘台式主机';
+    // 显示器等非电脑类型没有硬件字段，整块隐藏
+    let cfgHtml = '';
+    if (isComputer) {
+        const cfgItems = [['CPU', hw.cpu], ['内存', hw.mem], ['硬盘', hw.disk], ['显卡', hw.gpu]];
+        cfgHtml = cfgItems.some(([, v]) => v)
+            ? `<div class="hardware-grid">` + cfgItems.map(([label, v]) =>
+                `<div class="hardware-item"><label>${label}:</label><span class="hw-value">${escapeHtml(v || '-')}</span></div>`).join('') + `</div>`
+            : '<div class="hardware-empty">暂无硬件配置信息</div>';
+    }
 
-            document.getElementById('queryDetailModal').style.display = 'flex';
+    const historyHtml = (history && history.length)
+        ? `<div class="history-timeline">` + history.map(h => `
+            <div class="history-item">
+                <div class="history-dot"></div>
+                <div class="history-line"></div>
+                <div class="history-content">
+                    <span class="history-date">${escapeHtml(h.datetime || '未知日期')}</span>
+                    <span class="history-info">${escapeHtml(h.department || '-')} - ${escapeHtml(h.site || '-')}${h.tag ? ` · ${escapeHtml(h.tag)}` : ''}${h.status ? ` · ${escapeHtml(h.status)}` : ''}</span>
+                </div>
+            </div>`).join('') + `</div>`
+        : '<div class="history-empty">暂无历史数据</div>';
+
+    const urls = (basic.attachment_urls || '').split(',').filter(u => u.trim());
+    const attachHtml = urls.length
+        ? urls.map(url => `
+            <div class="attachment-detail-item" data-url="${escapeHtml(url)}">
+                <img src="${escapeHtml(url)}" class="attachment-detail-img" alt="附件图片" onclick="window.open('${escapeHtml(url)}','_blank')">
+            </div>`).join('')
+        : '<div class="attachment-empty">暂无附件</div>';
+
+    return `<div class="detail-view" data-id="${escapeHtml(basic.id)}" data-number="${escapeHtml(basic.number)}" data-source="${escapeHtml(basic.source)}">
+        <div class="detail-section">
+            <div class="detail-section-title">资产详情</div>
+            <div class="detail-basic-grid">
+                ${item('资产编码', val(basic.number, true))}
+                ${item('资产类型', val(basic.type))}
+                ${item('使用部门', val(basic.department))}
+                ${item('使用人', val(basic.site))}
+                ${item('发放日期', val(basic.datetime, true))}
+                ${item('资产规格', val(hw.spec), hw.spec || '')}
+                ${isRented ? item('SN码', val(hw.sn, true), hw.sn || '') : ''}
+                ${item('备注信息', val(basic.notice), basic.notice || '', !isRented)}
+            </div>
+            ${detailTogglesHtml(false)}
+        </div>
+        ${cfgHtml ? `<div class="detail-section">
+            <div class="detail-section-title">硬件配置</div>
+            ${cfgHtml}
+        </div>` : ''}
+        <div class="detail-section">
+            <div class="detail-section-title">历史数据</div>
+            ${historyHtml}
+        </div>
+        <div class="detail-section">
+            <div class="detail-section-title">附件</div>
+            <div class="attachment-detail-list">${attachHtml}</div>
+        </div>
+    </div>`;
+}
+
+function renderDetailView() {
+    document.getElementById('queryDetailBody').innerHTML = detailViewHtml();
+    bindDetailViewActions();
+}
+
+function renderDetailEdit() {
+    document.getElementById('queryDetailBody').innerHTML = detailEditHtml();
+    bindDetailActions();
+}
+
+function deleteDetailRecord(id) {
+    if (!confirm('是否删除，此操作不可逆！')) return;
+    fetch('/delete_by_id', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: `id=${id}`
+    }).then(r => r.json()).then(res => {
+        alert(res.message);
+        if (res.status === 'success') {
+            document.getElementById('queryDetailModal').style.display = 'none';
+            document.getElementById('queryBtn').click();
+            loadStatusCounts();
+        }
+    });
+}
+
+function bindDetailViewActions() {
+    const oldEditBtn = document.getElementById('qDetailEditBtn');
+    const oldDeleteBtn = document.getElementById('qDetailDeleteBtn');
+    const editBtn = oldEditBtn.cloneNode(true);
+    const deleteBtn = oldDeleteBtn.cloneNode(true);
+    oldEditBtn.parentNode.replaceChild(editBtn, oldEditBtn);
+    oldDeleteBtn.parentNode.replaceChild(deleteBtn, oldDeleteBtn);
+    editBtn.className = 'detail-action-btn';
+    editBtn.title = '修改'; editBtn.setAttribute('aria-label', '修改');
+    editBtn.innerHTML = ICON_PENCIL;
+    deleteBtn.className = 'detail-action-btn btn-danger';
+    deleteBtn.title = '删除'; deleteBtn.setAttribute('aria-label', '删除');
+    deleteBtn.innerHTML = ICON_TRASH;
+    editBtn.addEventListener('click', renderDetailEdit);
+    deleteBtn.addEventListener('click', () => deleteDetailRecord(document.querySelector('.detail-view').dataset.id));
+    bindViewQuickToggles();
+    // 只读视图没有「取消」按钮，保留右上角关闭图标
+    document.getElementById('queryDetailClose').style.display = 'flex';
+}
+
+// 只读视图直接提交：用台账现值兜底，只覆盖被点击的状态或标签
+function submitViewUpdate(overrides) {
+    const b = DETAIL_DATA.basic;
+    const body = new URLSearchParams();
+    body.set('id', b.id || '');
+    body.set('number', b.number || '');
+    body.set('department', b.department || '');
+    body.set('site', b.site || '');
+    body.set('type', b.type || '');
+    body.set('datetime', b.datetime || new Date().toISOString().split('T')[0]);
+    body.set('status', b.status || (b.type === '租聘台式主机' ? '租聘' : '未录入'));
+    body.set('tag', b.tag || '');
+    body.set('notice', b.notice || '');
+    body.set('attachment_urls', b.attachment_urls || '');
+    Object.entries(overrides).forEach(([k, v]) => body.set(k, v));
+    return fetch('/update', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: body.toString()
+    }).then(r => r.json());
+}
+
+// 查看态下点选状态 / 标签即刻落库，无需先进入编辑态
+function bindViewQuickToggles() {
+    const root = document.querySelector('.detail-view');
+    if (!root) return;
+    const groups = root.querySelectorAll('.status-toggles');
+    const statusGroup = root.querySelector('.status-toggles[data-group="status"]');
+    const tagGroup = root.querySelector('.status-toggles[data-group="tag"]');
+    if (!statusGroup || !tagGroup) return;
+    let saving = false;
+
+    const setActive = (group, key, value) => {
+        group.querySelectorAll('.status-toggle').forEach(t => t.classList.toggle('active', t.dataset[key] === value));
+    };
+    const lock = on => groups.forEach(g => g.classList.toggle('is-saving', on));
+
+    const push = (field, value, revert) => {
+        if (saving) return;
+        const b = DETAIL_DATA.basic;
+        if (!b.number || !b.department || !b.site) {
+            revert();
+            alert('该资产还缺少使用部门或使用人，请先点右上角「修改」补全后再切换。');
+            return;
+        }
+        saving = true;
+        lock(true);
+        submitViewUpdate({ [field]: value })
+            .then(res => {
+                if (res.status === 'success') {
+                    DETAIL_DATA.basic[field] = value;
+                    loadStatusCounts();
+                    document.getElementById('queryBtn').click();
+                } else {
+                    alert((field === 'status' ? '状态' : '标签') + '更新失败：' + (res.message || '未知错误'));
+                    revert();
+                }
+            })
+            .catch(() => {
+                alert('更新失败，请重试');
+                revert();
+            })
+            .finally(() => {
+                saving = false;
+                lock(false);
+            });
+    };
+
+    const bindChips = (group, key, resolve) => {
+        group.querySelectorAll('.status-toggle').forEach(chip => {
+            chip.addEventListener('click', () => {
+                if (saving) return;
+                const prev = DETAIL_DATA.basic[key] || '';
+                const next = resolve(chip, prev);
+                if (next === prev) return;
+                setActive(group, key, next);
+                push(key, next, () => setActive(group, key, prev));
+            });
+            chip.addEventListener('keydown', e => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    chip.click();
+                }
+            });
         });
-};
+    };
+
+    bindChips(statusGroup, 'status', chip => chip.dataset.status);
+    // 标签支持再次点击取消
+    bindChips(tagGroup, 'tag', (chip, prev) => (chip.dataset.tag === prev ? '' : chip.dataset.tag));
+}
 
 function bindDetailActions() {
     // 克隆按钮以清除所有旧的事件监听器，防止重复绑定
@@ -850,97 +1077,46 @@ function bindDetailActions() {
     const detailAttachmentInput = document.getElementById('detailAttachmentInput');
     const detailAttachmentAddBtn = document.getElementById('detailAttachmentAddBtn');
 
-    // 用状态变量管理编辑模式，避免动态事件监听器交换
-    let isEditing = false;
-    const originalValues = {};
-    // 保存原始附件URLs，取消时恢复
-    const originalAttachmentUrls = attachmentUrlsInput ? attachmentUrlsInput.value : '';
+    // 编辑模板渲染后即处于编辑态：左按钮=更新，右按钮=取消
 
-    // 初始状态
-    editBtn.className = 'detail-action-btn';
-    editBtn.title = '修改';
-    editBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10.5 2.5l3 3L5 14H2v-3L10.5 2.5z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-    deleteBtn.className = 'detail-action-btn btn-danger';
-    deleteBtn.title = '删除';
-    deleteBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M5.33 4V2.67a1.33 1.33 0 011.34-1.34h2.66a1.33 1.33 0 011.34 1.34V4m2 0v9.33a1.33 1.33 0 01-1.34 1.34H4.67a1.33 1.33 0 01-1.34-1.34V4h9.34z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    editBtn.className = 'detail-action-btn btn-update';
+    editBtn.title = '更新'; editBtn.setAttribute('aria-label', '更新');
+    editBtn.innerHTML = ICON_CHECK;
+    deleteBtn.className = 'detail-action-btn btn-cancel';
+    deleteBtn.title = '取消'; deleteBtn.setAttribute('aria-label', '取消');
+    deleteBtn.innerHTML = ICON_CLOSE;
     statusToggles.forEach(t => {
         t.classList.add('editable');
     });
 
-    // 统一删除/取消按钮处理
+    // 编辑态已有「取消」按钮，隐藏右上角关闭图标避免重复
+    document.getElementById('queryDetailClose').style.display = 'none';
+
+    // 进入编辑态的初始动作：启用控件、状态/日期默认值、显示删除与上传入口
+    // 无 name 的控件是台账派生的只读字段（资产规格/SN），启用后也不会提交，保持禁用
+    inputs.forEach(i => {
+        if (!i.name || i.name === 'number' || i.name === 'type') return;
+        i.disabled = false;
+    });
+    const assetType = form.querySelector('[name="type"]').value;
+    const keepStatus = assetType === '租聘台式主机' ? '租聘' : '未录入';
+    statusInput.value = keepStatus;
+    form.querySelectorAll('.status-toggle[data-status]').forEach(t => {
+        t.classList.toggle('active', t.dataset.status === keepStatus);
+    });
+    const dateInput = form.querySelector('input[name="datetime"]');
+    if (dateInput) dateInput.value = new Date().toISOString().split('T')[0];
+    form.querySelectorAll('.history-delete-btn').forEach(btn => btn.style.display = 'flex');
+    form.querySelectorAll('.attachment-detail-remove').forEach(btn => btn.style.display = 'flex');
+    if (detailAttachmentUpload) detailAttachmentUpload.style.display = 'block';
+
+    // 右按钮：编辑态下为「取消」，回到只读视图
     deleteBtn.addEventListener('click', () => {
-        if (!isEditing) {
-            // 删除模式
-            if (confirm('是否删除，此操作不可逆！')) {
-                const url = '/delete_by_id';
-                const body = `id=${id}`;
-                fetch(url, { method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body })
-                    .then(r => r.json())
-                    .then(res => {
-                        alert(res.message);
-                        if (res.status === 'success') {
-                            document.getElementById('queryDetailModal').style.display = 'none';
-                            document.getElementById('queryBtn').click();
-                            loadStatusCounts();
-                        }
-                    });
-            }
-        } else {
-            // 取消模式：恢复原始值
-            inputs.forEach(i => {
-                if (originalValues[i.name] !== undefined) i.value = originalValues[i.name];
-                i.disabled = true;
-            });
-            // 隐藏历史记录删除按钮
-            form.querySelectorAll('.history-delete-btn').forEach(btn => btn.style.display = 'none');
-            // 隐藏附件删除按钮和上传区，恢复原始附件
-            form.querySelectorAll('.attachment-detail-remove').forEach(btn => btn.style.display = 'none');
-            if (detailAttachmentUpload) detailAttachmentUpload.style.display = 'none';
-            if (attachmentUrlsInput) attachmentUrlsInput.value = originalAttachmentUrls;
-            // 重新渲染附件列表为原始状态
-            renderDetailAttachments(originalAttachmentUrls, false);
-            isEditing = false;
-            editBtn.className = 'detail-action-btn';
-            editBtn.title = '修改';
-            editBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10.5 2.5l3 3L5 14H2v-3L10.5 2.5z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-            deleteBtn.className = 'detail-action-btn btn-danger';
-            deleteBtn.title = '删除';
-            deleteBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M5.33 4V2.67a1.33 1.33 0 011.34-1.34h2.66a1.33 1.33 0 011.34 1.34V4m2 0v9.33a1.33 1.33 0 01-1.34 1.34H4.67a1.33 1.33 0 01-1.34-1.34V4h9.34z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-        }
+        renderDetailView();
     });
 
     // 统一修改/更新按钮处理
     editBtn.addEventListener('click', () => {
-        if (!isEditing) {
-            // 进入编辑模式
-            inputs.forEach(i => { originalValues[i.name] = i.value; });
-            inputs.forEach(i => {
-                if (i.name === 'number' || i.name === 'type') return;
-                i.disabled = false;
-            });
-            // 自动设置状态：租聘台式主机保持"租聘"，其他设为"未录入"
-            const assetType = form.querySelector('[name="type"]').value;
-            const keepStatus = assetType === '租聘台式主机' ? '租聘' : '未录入';
-            statusInput.value = keepStatus;
-            form.querySelectorAll('.status-toggle[data-status]').forEach(t => {
-                t.classList.toggle('active', t.dataset.status === keepStatus);
-            });
-            // 自动设置发放日期为当天
-            const dateInput = form.querySelector('input[name="datetime"]');
-            if (dateInput) dateInput.value = new Date().toISOString().split('T')[0];
-            // 显示历史记录删除按钮
-            form.querySelectorAll('.history-delete-btn').forEach(btn => btn.style.display = 'flex');
-            // 显示附件删除按钮和上传区
-            form.querySelectorAll('.attachment-detail-remove').forEach(btn => btn.style.display = 'flex');
-            if (detailAttachmentUpload) detailAttachmentUpload.style.display = 'block';
-            isEditing = true;
-            editBtn.className = 'detail-action-btn btn-update';
-            editBtn.title = '更新';
-            editBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M13.5 3.5l-9 9L2 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-            deleteBtn.className = 'detail-action-btn btn-cancel';
-            deleteBtn.title = '取消';
-            deleteBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
-        } else {
             // 执行更新
             const numberVal = form.querySelector('input[name="number"]').value.trim();
             const department = form.querySelector('select[name="department"]').value;
@@ -954,22 +1130,25 @@ function bindDetailActions() {
             }
 
             const attachmentUrls = attachmentUrlsInput ? attachmentUrlsInput.value : '';
+            editBtn.disabled = true;
+            editBtn.classList.add('is-loading');
+            editBtn.innerHTML = SPINNER;
             submitDetailUpdate(form, id, { attachment_urls: attachmentUrls })
                 .then(res => {
                     if (res.status === 'success') {
-                        if (source === 'device_list') {
-                            fetch('/sync_to_device_list', {
-                                method: 'POST',
-                                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-                                body: `number=${numberVal}&department=${department}&site=${site}`
-                            });
-                        }
                         document.getElementById('queryDetailModal').style.display = 'none';
                         document.getElementById('queryBtn').click();
                         loadStatusCounts();
+                    } else {
+                        alert('更新失败：' + (res.message || '未知错误'));
                     }
+                })
+                .catch(() => alert('更新失败，请重试'))
+                .finally(() => {
+                    editBtn.disabled = false;
+                    editBtn.classList.remove('is-loading');
+                    editBtn.innerHTML = ICON_CHECK;
                 });
-        }
     });
 
     // 附件管理
@@ -1051,20 +1230,11 @@ function bindDetailActions() {
             statusInput.value = newStatus;
 
             const numberVal = form.querySelector('input[name="number"]').value.trim();
-            const department = form.querySelector('select[name="department"]').value;
-            const site = form.querySelector('input[name="site"]').value.trim();
 
             statusUpdating = true;
             submitDetailUpdate(form, id, { status: newStatus })
                 .then(res => {
                     if (res.status === 'success') {
-                        if (source === 'device_list') {
-                            fetch('/sync_to_device_list', {
-                                method: 'POST',
-                                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-                                body: `number=${numberVal}&department=${department}&site=${site}`
-                            });
-                        }
                         loadStatusCounts();
                         document.getElementById('queryBtn').click();
                         document.querySelectorAll('.query-card').forEach(c => {
@@ -1158,9 +1328,4 @@ function bindDetailActions() {
 // 关闭详情弹窗
 document.getElementById('queryDetailClose').addEventListener('click', () => {
     document.getElementById('queryDetailModal').style.display = 'none';
-});
-document.getElementById('queryDetailModal').addEventListener('click', (e) => {
-    if (e.target.id === 'queryDetailModal') {
-        document.getElementById('queryDetailModal').style.display = 'none';
-    }
 });

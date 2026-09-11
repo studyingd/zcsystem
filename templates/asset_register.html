@@ -2,114 +2,203 @@
 
 {% block title %}资产管理系统 - 资产登记{% endblock %}
 
+{% block page_title %}资产登记{% endblock %}
+
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/asset_register.css">
+<link rel="stylesheet" href="/static/css/asset_register.css?v=19">
 {% endblock %}
 
 {% block content %}
-<div class="module">
-    <h2>资产登记</h2>
-    <form id="assetRegisterForm">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <div class="form-group">
-            <label>资产类型:</label>
-            <select id="assetType" name="asset_type" required>
-                <option value="">--请选择资产类型--</option>
-                <option value="台式主机">台式主机</option>
-                <option value="租聘台式主机">租聘台式主机</option>
-                <option value="笔记本电脑">笔记本电脑</option>
-                <option value="显示器">显示器</option>
-                <option value="其它">其它</option>
-            </select>
-            <input type="text" id="customType" name="custom_type" placeholder="请输入自定义类型" style="display:none; margin-left:10px; flex:1;">
+<div class="register-layout">
+
+    <!-- ============ 左：登记表单 ============ -->
+    <section class="module register-panel" aria-labelledby="registerTitle">
+        <div class="panel-head">
+            <h2 class="panel-title" id="registerTitle">新增资产</h2>
+            <p class="panel-desc">编码按「前缀 + 年月 + 3 位流水」自动生成，提交后直接写入台账。</p>
         </div>
 
-        <div class="form-group" id="snField" style="display: none;">
-            <label>SN码:</label>
-            <input type="text" id="assetSN" name="asset_sn" placeholder="请输入SN码">
+        <form id="assetRegisterForm" novalidate>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            <div class="form-grid">
+                <div class="form-group" data-field="asset_type">
+                    <label for="assetType">资产类型 <span class="req" aria-hidden="true">*</span></label>
+                    <select id="assetType" name="asset_type" required aria-describedby="assetTypeError">
+                        <option value="">--请选择资产类型--</option>
+                        {% for item in asset_types %}
+                        <option value="{{ item }}">{{ item }}</option>
+                        {% endfor %}
+                    </select>
+                    <input type="text" id="customType" name="custom_type" class="custom-type-input"
+                           placeholder="请输入自定义类型" aria-label="自定义资产类型" hidden>
+                    <span class="field-error" id="assetTypeError" hidden></span>
+                </div>
+
+                <div class="form-group" data-field="batch_quantity">
+                    <label for="batchQuantity">批量数量</label>
+                    <input type="number" id="batchQuantity" name="batch_quantity"
+                           min="1" max="{{ max_batch }}" value="1" step="1" required
+                           aria-describedby="batchQuantityError">
+                    <span class="field-error" id="batchQuantityError" hidden></span>
+                </div>
+
+                <!-- 规格文字往往很长（型号 + 配置描述），单独占一行 -->
+                <div class="form-group span-2" data-field="asset_spec">
+                    <label for="assetSpec">资产规格 <span class="req" aria-hidden="true">*</span></label>
+                    <input type="text" id="assetSpec" name="asset_spec" required
+                           placeholder="如: Lenovo ThinkPad E14 Gen 4（i5-1240P / 16G / 512G SSD）"
+                           aria-describedby="assetSpecError">
+                    <span class="field-error" id="assetSpecError" hidden></span>
+                </div>
+
+                <!-- SN 仅租聘台式主机需要（逐台一个），其余类型整组隐藏 -->
+                <div class="form-group span-2 sn-group" data-field="sn" hidden>
+                    <label for="assetSN">SN 码 <span class="req" aria-hidden="true">*</span></label>
+                    <textarea id="assetSN" name="asset_sn" rows="2"
+                              placeholder="每行一个 SN，按顺序对应生成的编码"
+                              aria-describedby="snError"></textarea>
+                    <span class="field-error" id="snError" hidden></span>
+                </div>
+
+                <div class="form-group" data-field="asset_dept">
+                    <label for="assetDept">使用部门</label>
+                    <select id="assetDept" name="asset_dept">
+                        <option value="">--请选择部门--</option>
+                        {% for dept in departments %}
+                        <option value="{{ dept }}">{{ dept }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-group" data-field="asset_user">
+                    <label for="assetUser">使用人</label>
+                    <input type="text" id="assetUser" name="asset_user" placeholder="请输入使用人">
+                </div>
+
+                <div class="form-group" data-field="asset_year_month">
+                    <label id="yearMonthLabel">资产年月</label>
+                    <!-- 原生 <input type="month"> 在 Safari / Firefox 会退化成文本框，
+                         改用年 / 月两个下拉组合，值仍落在隐藏域（YYYY-MM） -->
+                    <div class="month-picker" role="group" aria-labelledby="yearMonthLabel">
+                        <select id="assetYearMonthYear" aria-label="年份"></select>
+                        <select id="assetYearMonthMonth" aria-label="月份"></select>
+                    </div>
+                    <input type="hidden" id="assetYearMonth" name="asset_year_month">
+                </div>
+
+                <div class="form-group span-2">
+                    <div class="config-block" id="configSection" hidden>
+                        <button type="button" class="config-toggle" id="configToggle"
+                                aria-expanded="true" aria-controls="configFields">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <polyline points="6 9 12 15 18 9"></polyline>
+                            </svg>
+                            硬件配置
+                            <span class="config-toggle-hint">选填</span>
+                        </button>
+                        <div class="config-fields" id="configFields">
+                            <div class="form-group">
+                                <label for="configCPU">CPU</label>
+                                <input type="text" id="configCPU" placeholder="如: Intel i5-12400">
+                            </div>
+                            <div class="form-group">
+                                <label for="configMem">内存</label>
+                                <input type="text" id="configMem" placeholder="如: 16GB DDR4">
+                            </div>
+                            <div class="form-group">
+                                <label for="configDisk">硬盘</label>
+                                <input type="text" id="configDisk" placeholder="如: 512GB SSD">
+                            </div>
+                            <div class="form-group">
+                                <label for="configGPU">显卡</label>
+                                <input type="text" id="configGPU" placeholder="如: RTX 3060">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group span-2">
+                    <label id="codePreviewLabel">编码预览</label>
+                    <div id="codePreview" class="code-preview" role="status" aria-live="polite"
+                         aria-labelledby="codePreviewLabel">
+                        <span class="code-preview-empty">选择资产类型后自动生成</span>
+                    </div>
+                </div>
+            </div>
+
+            <div id="registerMsg" class="msg-box" role="status" aria-live="polite" hidden></div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn-primary" id="submitBtn">
+                    <span class="btn-label">确认登记</span>
+                </button>
+                <button type="button" id="resetBtn" class="btn-secondary">清空本批输入</button>
+            </div>
+        </form>
+    </section>
+
+    <!-- ============ 右：资产列表 ============ -->
+    <section class="module list-panel" aria-labelledby="listTitle">
+        <div class="panel-head">
+            <h2 class="panel-title" id="listTitle">资产列表</h2>
         </div>
 
-        <div class="form-group">
-            <label>资产规格:</label>
-            <input type="text" id="assetSpec" name="asset_spec" required placeholder="请输入资产规格">
+        <div class="list-toolbar">
+            <div class="toolbar-field">
+                <label for="filterMonth">月份</label>
+                <select id="filterMonth">
+                    <option value="">全部月份</option>
+                </select>
+            </div>
+            <div class="toolbar-field">
+                <label for="filterPrefix">编码</label>
+                <select id="filterPrefix">
+                    <option value="">全部前缀</option>
+                    <option value="DZ">DZ（自有）</option>
+                    <option value="ZL">ZL（租聘）</option>
+                </select>
+            </div>
+            <div class="toolbar-field toolbar-search">
+                <label for="searchInput" class="sr-only">搜索资产</label>
+                <input type="search" id="searchInput" placeholder="搜索编码 / SN / 规格 / 使用人" autocomplete="off">
+            </div>
+            <button type="button" id="refreshAssetList" class="btn-secondary btn-icon" aria-label="刷新资产列表">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <polyline points="23 4 23 10 17 10"></polyline>
+                    <polyline points="1 20 1 14 7 14"></polyline>
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                </svg>
+                <span>刷新</span>
+            </button>
         </div>
 
-        <div class="form-group">
-            <label>使用部门:</label>
-            <select id="assetDept" name="asset_dept">
-                <option value="">--请选择部门--</option>
-                <option value="FIN">FIN</option>
-                <option value="HR">HR</option>
-                <option value="SCM">SCM</option>
-                <option value="STU">STU</option>
-                <option value="GMO">GMO</option>
-                <option value="COM">COM</option>
-                <option value="CSG">CSG</option>
-                <option value="PMD">PMD</option>
-                <option value="IT">IT</option>
-                <option value="SMG">SMG</option>
-                <option value="证券事务部">证券事务部</option>
-            </select>
+        <div id="listMsg" class="msg-box" role="status" aria-live="polite" hidden></div>
+
+        <div id="assetListContainer" class="asset-list-container">
+            <div class="list-state" role="status">加载中…</div>
         </div>
 
-        <div class="form-group">
-            <label>使用人:</label>
-            <input type="text" id="assetUser" name="asset_user" placeholder="请输入使用人">
-        </div>
-
-        <div class="form-group">
-            <label>批量数量:</label>
-            <input type="number" id="batchQuantity" name="batch_quantity" min="1" max="999" value="1" required>
-            <span class="hint">（同时创建多个资产，编码自动连续）</span>
-        </div>
-
-        <div class="form-group">
-            <label>资产年月:</label>
-            <input type="month" id="assetYearMonth" name="asset_year_month">
-        </div>
-
-        <div id="configSection" class="config-section" style="display: none;">
-            <h3>资产配置</h3>
-            <div id="configFields"></div>
-        </div>
-
-        <div class="form-group">
-            <label>编码预览:</label>
-            <div id="codePreview" class="code-preview"></div>
-        </div>
-
-        <div class="form-actions">
-            <button type="button" id="previewBtn" class="btn-secondary">预览编码</button>
-            <button type="submit" class="btn-primary">确认登记</button>
-        </div>
-
-        <div id="registerMsg" class="msg-box" style="display: none;"></div>
-    </form>
-</div>
-
-<!-- 资产列表模块 -->
-<div class="module">
-    <h2>资产列表</h2>
-    <div class="filter-group">
-        <label>选择月份:</label>
-        <select id="filterMonth">
-            <option value="">全部月份</option>
-        </select>
-        <button type="button" id="refreshAssetList" class="btn-secondary">刷新</button>
-    </div>
-    <div id="assetListContainer" class="asset-list-container">
-        <div class="loading-tip">加载中...</div>
-    </div>
+        <nav id="listPagination" class="list-pagination" aria-label="资产列表分页" hidden></nav>
+    </section>
 </div>
 {% endblock %}
 
 {% block modals %}
 <!-- 资产详情弹窗 -->
-<div class="modal-overlay" id="assetDetailModal">
+<div class="modal-overlay" id="assetDetailModal" role="dialog" aria-modal="true" aria-labelledby="assetDetailTitle">
     <div class="modal-content">
         <div class="modal-header">
-            <h3>资产详情</h3>
-            <button class="modal-close" id="closeAssetDetail">&times;</button>
+            <h3 id="assetDetailTitle">资产详情</h3>
+            <button type="button" class="modal-close" id="closeAssetDetail" aria-label="关闭详情">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" aria-hidden="true">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
         </div>
         <div class="modal-body" id="assetDetailContent"></div>
     </div>
@@ -117,5 +206,15 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="/static/js/asset_register.js"></script>
+<script type="application/json" id="registerConfig">
+{{ {
+    'config_types': config_types | list,
+    'rental_type': rental_type,
+    'rental_default_spec': rental_default_spec,
+    'custom_type_option': custom_type_option,
+    'max_batch': max_batch,
+    'page_size': page_size
+} | tojson }}
+</script>
+<script src="/static/js/asset_register.js?v=19"></script></script></script></script>
 {% endblock %}

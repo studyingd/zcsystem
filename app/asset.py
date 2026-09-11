@@ -1,267 +1,429 @@
+"""资产登记页后端。
+
+台账（device_list + inventory）的唯一新增入口。编码规则、批量写入、
+「最新一条流转记录」等口径统一由 :mod:`app.ledger` 提供，本模块只做
+参数校验与 HTTP 层，避免与单据下推（``order.py``）各写一份。
+"""
+
 import logging
-from flask import Blueprint, render_template, request, jsonify, redirect, url_for, session
-from datetime import datetime, date
+from datetime import date
+
+from flask import Blueprint, jsonify, redirect, render_template, request, session, url_for
 from mysql.connector import Error
-from .config import get_db_connection
+
+from . import ledger
+from .config import S3_EXTERNAL_URL, get_db_connection
 
 asset_bp = Blueprint('asset', __name__)
 logger = logging.getLogger(__name__)
 
-# 资产登记页面
+# 并发取号冲突的口径与重试次数统一放在 ledger（与单据下推共用）
+ER_DUP_ENTRY = ledger.ER_DUP_ENTRY
+_DUP_RETRY = ledger.DUP_RETRY
+
+LIST_PAGE_SIZE = 15
+LIST_MAX_PAGE_SIZE = 200
+# 列表模糊搜索覆盖的字段
+_SEARCH_COLUMNS = ('number', 'sn', 'spec', 'type', 'department', 'name')
+
+_DEVICE_COLUMNS = 'id, number, spec, type, department, name, sn, cpu, mem, disk, gpu'
+
+
+def _logged_in():
+    return bool(session.get('logged_in'))
+
+
+def _denied():
+    return jsonify({'status': 'error', 'message': '未登录，请先登录'}), 401
+
+
+def _db_error():
+    return jsonify({'status': 'error', 'message': '数据库连接失败'}), 500
+
+
+def _bad_request(message):
+    return jsonify({'status': 'error', 'message': message}), 400
+
+
+def _int_arg(value, default, minimum, maximum):
+    """参数转整数并夹在 [minimum, maximum] 内，非法值回退默认值。"""
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(maximum, number))
+
+
+def _like(value):
+    """转义 LIKE 通配符，避免用户输入的 % _ \\ 退化成全表匹配。"""
+    escaped = value.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+    return f'%{escaped}%'
+
+
+def _list_filters(args):
+    """解析列表筛选参数，返回 (where_sql, params, month, prefix, keyword)。"""
+    clauses = ['LENGTH(number) = %s']
+    params = [ledger.CODE_LENGTH]
+
+    month = (args.get('month') or '').strip()
+    if len(month) == 4 and month.isdigit():
+        clauses.append('SUBSTRING(number, 3, 4) = %s')
+        params.append(month)
+    else:
+        month = ''
+
+    prefix = (args.get('prefix') or '').strip().upper()
+    if prefix in (ledger.CODE_PREFIX_DEFAULT, ledger.CODE_PREFIX_RENTAL):
+        clauses.append('number LIKE %s')
+        params.append(f'{prefix}%')
+    else:
+        prefix = ''
+
+    keyword = (args.get('q') or '').strip()
+    if keyword:
+        pattern = _like(keyword)
+        clauses.append('(' + ' OR '.join(f'{col} LIKE %s' for col in _SEARCH_COLUMNS) + ')')
+        params.extend([pattern] * len(_SEARCH_COLUMNS))
+
+    return ' AND '.join(clauses), params, month, prefix, keyword
+
+
+def _months(cursor):
+    """台账已覆盖的年月码，倒序（最新月份在前）。"""
+    cursor.execute(
+        "SELECT DISTINCT SUBSTRING(number, 3, 4) AS month FROM device_list "
+        "WHERE LENGTH(number) = %s ORDER BY month DESC",
+        (ledger.CODE_LENGTH,)
+    )
+    return [row['month'] for row in cursor.fetchall() if row['month']]
+
+
+def _overlay_latest_inventory(cursor, rows):
+    """用 inventory 最新一条流转记录覆盖部门 / 使用人，并带出状态与流转日期。
+
+    device_list 是使用现状快照，inventory 才是流转事实来源；列表与详情都经过
+    本函数，保证两处口径一致（读取时派生，不落库）。
+    """
+    latest = ledger.latest_inventory_rows(cursor, [row['number'] for row in rows])
+    for row in rows:
+        inv = latest.get(row['number']) or {}
+        row['department'] = inv.get('department') or row.get('department') or ''
+        row['name'] = inv.get('site') or row.get('name') or ''
+        row['inv_status'] = inv.get('status') or ''
+        row['inv_tag'] = inv.get('tag') or ''
+        row['inv_date'] = inv.get('datetime') or ''
+    return rows
+
+
+# ---------- 页面 ----------
 @asset_bp.route('/asset_register')
 def asset_register():
-    if not session.get('logged_in'):
+    if not _logged_in():
         return redirect(url_for('auth.login'))
-    return render_template('asset_register.html', active_nav='asset_register', logged_in=True)
+    return render_template(
+        'asset_register.html',
+        active_nav='asset_register',
+        logged_in=True,
+        asset_types=ledger.ASSET_TYPES,
+        config_types=ledger.CONFIG_TYPES,
+        custom_type_option=ledger.CUSTOM_TYPE_OPTION,
+        rental_type=ledger.RENTAL_DESKTOP_TYPE,
+        rental_default_spec=ledger.RENTAL_DEFAULT_SPEC,
+        departments=ledger.DEPARTMENTS,
+        max_batch=ledger.MAX_REGISTER_BATCH,
+        page_size=LIST_PAGE_SIZE,
+    )
 
-# 生成资产编码（预览用）
-@asset_bp.route('/api/generate_asset_codes', methods=['POST'])
-def generate_asset_codes():
-    if not session.get('logged_in'):
-        return jsonify({'status': 'error', 'message': '未登录'}), 401
 
-    data = request.get_json()
-    asset_type = data.get('asset_type')
-    quantity = data.get('quantity', 1)
-    year_month = data.get('year_month')  # 格式: 2026-03
-
-    if not asset_type:
-        return jsonify({'status': 'error', 'message': '请选择资产类型'}), 400
-
-    # 前缀规则
-    prefix = 'ZL' if asset_type == '租聘台式主机' else 'DZ'
-
-    # 日期码 (2603 格式 - 年月)
-    if year_month:
-        parts = year_month.split('-')
-        date_code = parts[0][2:] + parts[1]
-    else:
-        today = datetime.now()
-        date_code = today.strftime('%y%m')
-
-    # 查询同月最大序号
-    conn = get_db_connection()
-    next_seq = 1
-    cursor = None
-    if conn:
-        try:
-            cursor = conn.cursor()
-            cursor.execute(
-                f"SELECT number FROM device_list WHERE number LIKE %s AND LENGTH(number) = 9 ORDER BY number DESC LIMIT 1",
-                (f"{prefix}{date_code}%",)
-            )
-            result = cursor.fetchone()
-            if result:
-                last_code = result[0]
-                last_seq = int(last_code[-3:])
-                next_seq = last_seq + 1
-        except Error as e:
-            logger.error("查询最大序号错误: %s", e)
-        finally:
-            if cursor:
-                cursor.close()
-            conn.close()
-
-    # 生成编码列表
-    codes = []
-    for i in range(next_seq, next_seq + quantity):
-        seq = str(i).zfill(3)
-        codes.append(f"{prefix}{date_code}{seq}")
-
+# ---------- 页面元数据 ----------
+@asset_bp.route('/api/asset_register/meta')
+def asset_register_meta():
+    """品牌图标地址由后端下发：图标存放在对象存储，前端不再硬编码内网 IP。"""
+    if not _logged_in():
+        return _denied()
+    icon_base = (S3_EXTERNAL_URL or '').rstrip('/')
     return jsonify({
         'status': 'success',
-        'codes': codes,
-        'prefix': prefix,
-        'date_code': date_code
+        'icon_base': f'{icon_base}/icon/' if icon_base else '',
+        'brand_icons': [{'keywords': list(keywords), 'file': filename}
+                        for keywords, filename in ledger.BRAND_ICONS],
     })
 
-# 批量创建资产
-@asset_bp.route('/api/batch_create_assets', methods=['POST'])
-def batch_create_assets():
-    if not session.get('logged_in'):
-        return jsonify({'status': 'error', 'message': '未登录'}), 401
 
-    data = request.get_json()
-    asset_type = data.get('asset_type')
-    asset_spec = data.get('asset_spec')
-    asset_dept = data.get('asset_dept', '')
-    asset_user = data.get('asset_user', '')
-    year_month = data.get('year_month', '')
-    batch_quantity = data.get('batch_quantity', 1)
-    config = data.get('config', {})
+# ---------- 编码预览 ----------
+@asset_bp.route('/api/generate_asset_codes', methods=['POST'])
+def generate_asset_codes():
+    """预览将要生成的编码。
 
-    if not all([asset_type, asset_spec]):
-        return jsonify({'status': 'error', 'message': '请填写所有必填字段'}), 400
+    与 ``batch_create_assets`` 共用 :func:`ledger.next_asset_numbers`，但两次调用
+    之间若有其他写入（他人登记 / 单据下推），序号会前移 —— 因此预览仅供参考，
+    实际编码以提交响应中的 ``first_number`` / ``last_number`` 为准。
+    """
+    if not _logged_in():
+        return _denied()
 
-    # 前缀规则
-    prefix = 'ZL' if asset_type == '租聘台式主机' else 'DZ'
+    data = request.get_json(silent=True) or {}
+    asset_type = (data.get('asset_type') or '').strip()
+    if not asset_type:
+        return _bad_request('请选择资产类型')
 
-    # 日期码
-    if year_month:
-        parts = year_month.split('-')
-        date_code = parts[0][2:] + parts[1]
-    else:
-        today = datetime.now()
-        date_code = today.strftime('%y%m')
+    quantity = _int_arg(data.get('quantity'), 1, 1, ledger.MAX_REGISTER_BATCH)
+    try:
+        yymm = ledger.yymm_from_month(data.get('year_month'))
+    except ValueError as exc:
+        return _bad_request(str(exc))
 
     conn = get_db_connection()
     if not conn:
-        return jsonify({'status': 'error', 'message': '数据库连接失败'}), 500
+        return _db_error()
 
-    next_seq = 1
     cursor = None
     try:
-        cursor = conn.cursor()
-        cursor.execute(
-            f"SELECT number FROM device_list WHERE number LIKE %s AND LENGTH(number) = 9 ORDER BY number DESC LIMIT 1",
-            (f"{prefix}{date_code}%",)
-        )
-        result = cursor.fetchone()
-        if result:
-            last_code = result[0]
-            last_seq = int(last_code[-3:])
-            next_seq = last_seq + 1
-
-        cursor.execute("SELECT COALESCE(MAX(id), 0) FROM inventory")
-        inv_next_id = cursor.fetchone()[0] + 1
-
-        today_str = date.today().strftime('%Y-%m-%d')
-
-        for i in range(next_seq, next_seq + batch_quantity):
-            seq = str(i).zfill(3)
-            asset_number = f"{prefix}{date_code}{seq}"
-
-            if asset_type in ['笔记本电脑', '台式主机', '租聘台式主机']:
-                if asset_type == '租聘台式主机':
-                    cursor.execute(
-                        "INSERT INTO device_list (type, number, spec, department, name, sn, cpu, mem, disk, gpu) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                        (asset_type, asset_number, asset_spec, asset_dept, asset_user, config.get('sn', ''), config.get('cpu', ''), config.get('mem', ''), config.get('disk', ''), config.get('gpu', ''))
-                    )
-                else:
-                    cursor.execute(
-                        "INSERT INTO device_list (type, number, spec, department, name, cpu, mem, disk, gpu) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                        (asset_type, asset_number, asset_spec, asset_dept, asset_user, config.get('cpu', ''), config.get('mem', ''), config.get('disk', ''), config.get('gpu', ''))
-                    )
-            else:
-                cursor.execute(
-                    "INSERT INTO device_list (type, number, spec, department, name) VALUES (%s, %s, %s, %s, %s)",
-                    (asset_type, asset_number, asset_spec, asset_dept, asset_user)
-                )
-
-            cursor.execute(
-                "INSERT INTO inventory (id, number, department, site, type, datetime, status, tag, notice, attachment_urls) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                (inv_next_id, asset_number, asset_dept, asset_user, asset_type, today_str, '租聘' if asset_type == '租聘台式主机' else '入库', '入库', '', '')
-            )
-            inv_next_id += 1
-
-        conn.commit()
+        cursor = conn.cursor(dictionary=True)
+        codes = ledger.next_asset_numbers(cursor, asset_type, yymm, quantity)
         return jsonify({
             'status': 'success',
-            'message': f'资产登记成功（批量 {batch_quantity} 个）'
+            'codes': codes,
+            'prefix': ledger.asset_prefix(asset_type),
+            'date_code': yymm,
+            'quantity': quantity,
         })
-    except Error as e:
-        conn.rollback()
-        logger.error("登记失败: %s", e)
+    except ValueError as exc:
+        return _bad_request(str(exc))
+    except Error as exc:
+        logger.error("查询最大序号错误: %s", exc)
         return jsonify({'status': 'error', 'message': '服务器内部错误'}), 500
     finally:
         if cursor:
             cursor.close()
         conn.close()
 
-# 获取所有资产列表（按月份分组）
-@asset_bp.route('/api/get_all_assets', methods=['GET'])
-def get_all_assets():
-    if not session.get('logged_in'):
-        return jsonify({'status': 'error', 'message': '未登录'}), 401
 
-    month = request.args.get('month', '')
+# ---------- 批量登记 ----------
+def _parse_registration(data):
+    """校验并规范化登记请求，返回 (payload, error_message)。
+
+    payload 含 asset_type / spec / department / user / yymm / quantity /
+    config（cpu / mem / disk / gpu）/ sn_list。
+    """
+    asset_type = (data.get('asset_type') or '').strip()
+    spec = (data.get('asset_spec') or '').strip()
+    if not asset_type or not spec:
+        return None, '请填写所有必填字段'
+
+    try:
+        quantity = int(data.get('batch_quantity'))
+    except (TypeError, ValueError):
+        return None, '批量数量必须是整数'
+    if quantity < 1:
+        return None, '批量数量至少为 1'
+    if quantity > ledger.MAX_REGISTER_BATCH:
+        return None, f'单次批量数量不能超过 {ledger.MAX_REGISTER_BATCH} 个'
+
+    try:
+        yymm = ledger.yymm_from_month(data.get('year_month'))
+    except ValueError as exc:
+        return None, str(exc)
+
+    config = data.get('config') or {}
+    if not isinstance(config, dict):
+        config = {}
+    # 硬件配置只对电脑类资产有意义，其余类型一律留空（不信任前端传值）
+    hardware_keys = ('cpu', 'mem', 'disk', 'gpu') if asset_type in ledger.CONFIG_TYPES else ()
+    hardware = {key: (config.get(key) or '').strip() for key in hardware_keys}
+
+    # SN 是设备唯一标识：批量登记时必须逐台提供，不能整批共用一个
+    sn_list = []
+    if asset_type == ledger.RENTAL_DESKTOP_TYPE:
+        raw = config.get('sn_list')
+        if isinstance(raw, list):
+            sn_list = [str(item).strip() for item in raw]
+        else:
+            sn_list = [line.strip() for line in str(config.get('sn') or '').splitlines()]
+        sn_list = [item for item in sn_list if item]
+        if len(sn_list) != quantity:
+            return None, f'SN 码数量（{len(sn_list)}）与批量数量（{quantity}）不一致，请每行填写一个 SN'
+        if len(set(sn_list)) != len(sn_list):
+            return None, 'SN 码存在重复，请逐台核对'
+
+    payload = {
+        'asset_type': asset_type,
+        'spec': spec,
+        'department': (data.get('asset_dept') or '').strip(),
+        'user': (data.get('asset_user') or '').strip(),
+        'yymm': yymm,
+        'quantity': quantity,
+        'hardware': hardware,
+        'sn_list': sn_list,
+    }
+    return payload, None
+
+
+def _execute_registration(conn, payload):
+    """执行一次登记，撞唯一键时重取序号重试；连接由调用方关闭。"""
+    cursor = None
+    for attempt in range(_DUP_RETRY + 1):
+        try:
+            cursor = conn.cursor(dictionary=True)
+            numbers = ledger.next_asset_numbers(
+                cursor, payload['asset_type'], payload['yymm'], payload['quantity']
+            )
+            assets = []
+            for index, number in enumerate(numbers):
+                item = {
+                    'number': number,
+                    'type': payload['asset_type'],
+                    'spec': payload['spec'],
+                    'department': payload['department'],
+                    'name': payload['user'],
+                }
+                item.update(payload['hardware'])
+                if payload['sn_list']:
+                    item['sn'] = payload['sn_list'][index]
+                assets.append(item)
+
+            ledger.insert_ledger_assets(cursor, assets, date.today())
+            conn.commit()
+
+            quantity = len(numbers)
+            span = numbers[0] if quantity == 1 else f'{numbers[0]} ~ {numbers[-1]}'
+            return jsonify({
+                'status': 'success',
+                'message': f'资产登记成功：{span}（共 {quantity} 个）',
+                'first_number': numbers[0],
+                'last_number': numbers[-1],
+                'numbers': numbers,
+                'quantity': quantity,
+            })
+        except ValueError as exc:
+            conn.rollback()
+            return _bad_request(str(exc))
+        except Error as exc:
+            conn.rollback()
+            if getattr(exc, 'errno', None) == ER_DUP_ENTRY and attempt < _DUP_RETRY:
+                logger.warning("登记序号冲突，重取序号重试（第 %s 次）: %s", attempt + 1, exc)
+                continue
+            logger.error("登记失败: %s", exc)
+            if getattr(exc, 'errno', None) == ER_DUP_ENTRY:
+                return jsonify({
+                    'status': 'error',
+                    'message': '资产编码冲突（可能有其他人正在登记或下推单据），请稍后重试',
+                }), 409
+            return jsonify({'status': 'error', 'message': '服务器内部错误'}), 500
+        finally:
+            if cursor:
+                cursor.close()
+                cursor = None
+
+    logger.error("登记重试 %s 次后仍失败", _DUP_RETRY)
+    return jsonify({'status': 'error', 'message': '资产编码冲突，请稍后重试'}), 409
+
+
+@asset_bp.route('/api/batch_create_assets', methods=['POST'])
+def batch_create_assets():
+    if not _logged_in():
+        return _denied()
+
+    payload, error = _parse_registration(request.get_json(silent=True) or {})
+    if error:
+        return _bad_request(error)
 
     conn = get_db_connection()
     if not conn:
-        return jsonify({'status': 'error', 'message': '数据库连接失败'}), 500
+        return _db_error()
+    try:
+        return _execute_registration(conn, payload)
+    finally:
+        conn.close()
 
+
+# ---------- 资产列表（搜索 / 筛选 / 分页） ----------
+@asset_bp.route('/api/get_all_assets', methods=['GET'])
+def get_all_assets():
+    """台账资产列表。
+
+    支持按年月码（month=YYMM）、编码前缀（prefix=DZ|ZL）、关键字（q，覆盖
+    编码 / SN / 规格 / 类型 / 部门 / 使用人）筛选，并分页返回。每行都会用
+    inventory 最新一条流转记录覆盖部门与使用人，并带出资产状态，因此列表
+    与详情弹窗、资产变更页看到的是同一份口径。
+    """
+    if not _logged_in():
+        return _denied()
+
+    args = request.args
+    where_sql, params, month, prefix, keyword = _list_filters(args)
+    page = _int_arg(args.get('page'), 1, 1, 100000)
+    page_size = _int_arg(args.get('page_size'), LIST_PAGE_SIZE, 10, LIST_MAX_PAGE_SIZE)
+
+    conn = get_db_connection()
+    if not conn:
+        return _db_error()
+
+    cursor = None
     try:
         cursor = conn.cursor(dictionary=True, buffered=True)
+        cursor.execute(f"SELECT COUNT(*) AS cnt FROM device_list WHERE {where_sql}", params)
+        total = int(cursor.fetchone()['cnt'])
 
-        if month:
-            where_clause = "WHERE LENGTH(number) = 9 AND SUBSTRING(number, 3, 4) = %s"
-            params = [month]
-        else:
-            where_clause = "WHERE LENGTH(number) = 9"
-            params = []
+        total_pages = max(1, -(-total // page_size))
+        page = min(page, total_pages)
+        offset = (page - 1) * page_size
 
-        query = f"""
-            SELECT id, number, spec, type, department, name, sn, cpu, mem, disk, gpu
-            FROM device_list {where_clause}
-            ORDER BY number ASC
-        """
-        cursor.execute(query, params)
-        all_rows = cursor.fetchall()
-
-        grouped = {}
-        for row in all_rows:
-            code = row['number']
-            if len(code) >= 4:
-                month_key = code[2:6]
-                if month_key not in grouped:
-                    grouped[month_key] = {'DZ': [], 'ZL': []}
-                if code.startswith('ZL'):
-                    grouped[month_key]['ZL'].append(row)
-                else:
-                    grouped[month_key]['DZ'].append(row)
-
-        cursor.execute("SELECT DISTINCT SUBSTRING(number, 3, 4) as month FROM device_list WHERE LENGTH(number) = 9 ORDER BY month DESC")
-        months = [r['month'] for r in cursor.fetchall()]
+        cursor.execute(
+            f"SELECT {_DEVICE_COLUMNS} FROM device_list WHERE {where_sql} "
+            f"ORDER BY number DESC, id DESC LIMIT %s OFFSET %s",
+            (*params, page_size, offset)
+        )
+        rows = _overlay_latest_inventory(cursor, list(cursor.fetchall()))
 
         return jsonify({
             'status': 'success',
-            'grouped': grouped,
-            'months': months,
-            'current_month': month
+            'rows': rows,
+            'total': total,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': total_pages,
+            'months': _months(cursor),
+            'filters': {'month': month, 'prefix': prefix, 'q': keyword},
         })
-    except Error as e:
+    except Error as exc:
+        logger.error("资产列表查询失败: %s", exc)
         return jsonify({'status': 'error', 'message': '服务器内部错误'}), 500
     finally:
-        cursor.close()
+        if cursor:
+            cursor.close()
         conn.close()
 
-# 获取单个资产详情
+
+# ---------- 资产详情 ----------
 @asset_bp.route('/api/get_asset_detail', methods=['GET'])
 def get_asset_detail():
-    if not session.get('logged_in'):
-        return jsonify({'status': 'error', 'message': '未登录'}), 401
+    """单个资产详情，部门 / 使用人 / 状态取 inventory 最新一条流转记录。"""
+    if not _logged_in():
+        return _denied()
 
-    asset_id = request.args.get('id')
-    if not asset_id:
-        return jsonify({'status': 'error', 'message': '缺少资产ID'}), 400
+    asset_id = (request.args.get('id') or '').strip()
+    if not asset_id.isdigit():
+        return _bad_request('缺少资产ID')
 
     conn = get_db_connection()
     if not conn:
-        return jsonify({'status': 'error', 'message': '数据库连接失败'}), 500
+        return _db_error()
 
+    cursor = None
     try:
         cursor = conn.cursor(dictionary=True, buffered=True)
-        cursor.execute(
-            "SELECT id, number, spec, type, site, department, name, sn, cpu, mem, disk, gpu FROM device_list WHERE id = %s",
-            (asset_id,)
-        )
+        cursor.execute(f"SELECT {_DEVICE_COLUMNS} FROM device_list WHERE id = %s", (asset_id,))
         asset = cursor.fetchone()
-
         if not asset:
             return jsonify({'status': 'error', 'message': '资产不存在'}), 404
 
-        cursor.execute(
-            "SELECT department, site FROM inventory WHERE number = %s",
-            (asset['number'],)
-        )
-        inv = cursor.fetchone()
-        if inv:
-            asset['department'] = inv['department']
-            asset['site'] = inv['site']
-
+        asset = _overlay_latest_inventory(cursor, [asset])[0]
         return jsonify({'status': 'success', 'data': asset})
-    except Error as e:
+    except Error as exc:
+        logger.error("资产详情查询失败: %s", exc)
         return jsonify({'status': 'error', 'message': '服务器内部错误'}), 500
     finally:
-        cursor.close()
+        if cursor:
+            cursor.close()
         conn.close()
