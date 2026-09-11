@@ -8,6 +8,10 @@ wheels/
 
 # Virtual environments
 .venv
+.venv*
+
+# Local tool caches
+.codegraph/
 
 # Environment variables
 .env
