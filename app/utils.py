@@ -1,11 +1,11 @@
-import hashlib
+"""密码哈希工具。
+
+仅保留 bcrypt：存量 MD5 密码已全部迁移完毕（可用
+``scripts/check_password_migration.py`` 复核），弱哈希分支已下线。
+``hash_password_bcrypt`` 供管理员重置 / 新建账号时使用。
+"""
+
 import bcrypt
-
-
-def generate_md5_hash(password):
-    md5 = hashlib.md5()
-    md5.update(password.encode('utf-8'))
-    return md5.hexdigest()
 
 
 def hash_password_bcrypt(password):

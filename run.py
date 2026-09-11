@@ -12,5 +12,7 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))
     # gunicorn 等生产入口会设置对应环境变量，此时不开调试
     production = bool(os.environ.get('GUNICORN_CMD_ARGS') or os.environ.get('FLASK_PRODUCTION'))
-    debug = not production and os.environ.get('FLASK_DEBUG', '1') == '1'
+    # 调试模式默认关闭：Werkzeug 调试器可在页面上执行任意代码，
+    # 只允许开发机显式 FLASK_DEBUG=1 打开，避免生产误用 python run.py 裸奔
+    debug = not production and os.environ.get('FLASK_DEBUG', '0') == '1'
     app.run(host=host, port=port, debug=debug)

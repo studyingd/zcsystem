@@ -1,8 +1,9 @@
-import os
 import logging
-from flask import Flask, render_template, request
-from flask_wtf.csrf import CSRFProtect, CSRFError
+import os
+
 from dotenv import load_dotenv
+from flask import Flask, render_template, request
+from flask_wtf.csrf import CSRFError, CSRFProtect
 
 load_dotenv()
 
@@ -19,6 +20,8 @@ def create_app():
     app.secret_key = os.environ['SECRET_KEY']
     app.config['SESSION_COOKIE_HTTPONLY'] = True
     app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+    # HTTPS 部署时设 SESSION_COOKIE_SECURE=1，禁止 cookie 走明文信道
+    app.config['SESSION_COOKIE_SECURE'] = os.environ.get('SESSION_COOKIE_SECURE', '0') == '1'
     # CSRF token 跟随会话：不设独立倒计时，会话活着 token 就一直有效
     # （会话为浏览器会话级：关浏览器 / 登出即失效，下次进入重新签发）
     app.config['WTF_CSRF_TIME_LIMIT'] = None
@@ -31,12 +34,12 @@ def create_app():
             return render_template('login.html', error='页面已过期，请重新输入账号密码'), 400
         return e.get_response()
 
-    from .auth import auth_bp
-    from .inventory import inv_bp
     from .asset import asset_bp
+    from .auth import auth_bp
     from .dashboard import dashboard_bp
+    from .inventory import inv_bp
+    from .meta import frontend_meta, meta_bp
     from .order import order_bp
-    from .meta import meta_bp, frontend_meta
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(inv_bp)

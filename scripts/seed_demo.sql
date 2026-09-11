@@ -1,10 +1,11 @@
 -- 本地演示数据（可随时 TRUNCATE 清空），仅用于让页面/看板有内容可看
 SET NAMES utf8mb4;
 
--- 登录账号: admin / admin123  (password 为 MD5，首次登录成功后应用会自动写入 password_bcrypt)
+-- 登录账号: admin / admin123  (password_bcrypt 为 bcrypt 哈希；MD5 兼容分支已下线，
+-- password 列仅为历史兼容保留)
 INSERT INTO identified (username, password, password_bcrypt)
-VALUES ('admin', '0192023a7bbd73250516f069df18b500', '')
-ON DUPLICATE KEY UPDATE password = VALUES(password);
+VALUES ('admin', '', '$2b$12$o2q5zs5GzxM4L6ixHsoyc.p8r0tWuedgY5zhS1OJPjX5AD09c15Pa')
+ON DUPLICATE KEY UPDATE password_bcrypt = VALUES(password_bcrypt);
 
 -- 台账：IT/余嘉雄 名下为"库存"保管人（与 app/dashboard.py 的常量一致）
 INSERT INTO device_list (number, spec, type, department, name, sn, cpu, mem, disk, gpu) VALUES
