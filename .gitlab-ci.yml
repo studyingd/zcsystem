@@ -1,31 +1,29 @@
-# You can override the included template(s) by including variable overrides
-# SAST customization: https://docs.gitlab.com/user/application_security/sast/#available-cicd-variables
-# Secret Detection customization: https://docs.gitlab.com/user/application_security/secret_detection/pipeline/configure/
-# Dependency Scanning customization: https://docs.gitlab.com/user/application_security/dependency_scanning/dependency_scanning_sbom/#customizing-analyzer-behavior
-# Container Scanning customization: https://docs.gitlab.com/user/application_security/container_scanning/#customizing-analyzer-behavior
-# Note that environment variables can be set in several places
-# See https://docs.gitlab.com/ci/variables/#cicd-variable-precedence
+# CI：lint + 单元测试 + 密钥扫描。
+# 此前是 GitLab Auto-DevOps 默认模板（17 个 stage：canary/dast/performance…），
+# 与本项目实际的「gunicorn 裸机部署」完全不匹配，精简为可跑的最小流水线。
+# 部署仍走服务器上的 gunicorn（见 README），不在 CI 内自动发布。
+
 stages:
-- build
-- test
-- deploy
-- review
-- dast
-- staging
-- canary
-- production
-- incremental rollout 10%
-- incremental rollout 25%
-- incremental rollout 50%
-- incremental rollout 100%
-- performance
-- cleanup
-- secret-detection
-sast:
-  stage: test
-include:
-- template: Auto-DevOps.gitlab-ci.yml
+  - test
+
+default:
+  image: python:3.14
+
 variables:
   SECRET_DETECTION_ENABLED: 'true'
-secret_detection:
-  stage: secret-detection
+
+lint:
+  stage: test
+  script:
+    - pip install --quiet ruff
+    - ruff check .
+
+test:
+  stage: test
+  script:
+    # 单元测试只依赖标准库 + pytest（不连数据库），无需装全量依赖
+    - pip install --quiet pytest
+    - pytest tests/ -v
+
+include:
+  - template: Security/Secret-Detection.gitlab-ci.yml
