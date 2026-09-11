@@ -4,7 +4,7 @@
 
 ## 功能模块
 
-- **用户认证** — 登录/登出，MD5 密码加密
+- **用户认证** — 登录/登出，bcrypt 密码哈希（MD5 已全量迁移并下线）；登录失败统一提示 + 限流（同 IP+用户名 10 分钟内失败 5 次锁定 15 分钟）
 - **资产登记** — 批量创建资产，自动生成编码（DZ/ZL 前缀），同时写入 `device_list` 和 `inventory` 表
 - **资产变更与查询** — 支持按资产编码、SN码、使用人、使用部门、ID 查询；变更使用人时自动备份历史记录
 - **实时数据预览** — 按资产状态（已录入/未录入/租聘/借用/入库/无需录入）分类展示
@@ -61,7 +61,8 @@
 │   ├── ledger.py           # 台账口径与派生逻辑（三模块共用，唯一事实来源）
 │   ├── meta.py             # 前端词表下发（context processor + /api/meta）
 │   ├── dashboard.py        # 看板页面路由（仅渲染，不含业务逻辑）
-│   └── utils.py            # 密码工具（bcrypt 哈希 + 遗留 MD5 校验）
+│   ├── common.py           # 跨蓝图 HTTP 样板（登录检查装饰器 / 连接管理 / 统一错误响应）
+│   └── utils.py            # 密码工具（bcrypt 哈希与校验）
 ├── templates/
 │   ├── base.html           # 应用外壳（侧边导航 + 顶栏 + #zcMeta 词表）
 │   ├── login.html          # 登录页
@@ -82,16 +83,22 @@
 │   ├── init_documents.sql  # 单据/预算/资产卡片表结构
 │   ├── seed_documents.sql  # 单据与预算演示数据（幂等）
 │   ├── seed_demo.sql       # 台账演示数据
-│   └── migrate_asset_register.py # 给 device_list.number 加唯一索引（幂等，含 --check）
+│   ├── migrate_asset_register.py         # 给 device_list.number 加唯一索引（幂等，含 --check）
+│   ├── migrate_inventory_autoincrement.py # inventory.id 改 AUTO_INCREMENT（幂等，含 --check）
+│   └── check_password_migration.py       # 复核账号 bcrypt 迁移进度（只读）
+├── tests/
+│   └── test_ledger.py      # 台账口径单元测试（纯逻辑，不连数据库）
+├── requirements.txt        # 由 uv export 生成（勿手改），供非 uv 环境 pip 安装
+└── .gitlab-ci.yml          # CI：ruff lint + pytest + 密钥扫描
 ```
 
 ## 数据库表
 
 | 表名 | 说明 |
 |------|------|
-| `identified` | 用户账号表（username, MD5 password） |
+| `identified` | 用户账号表（username, password_bcrypt；`password` MD5 列仅历史兼容保留，登录不再使用） |
 | `device_list` | 设备台账表（number, spec, type, department, name, sn, cpu, mem, disk, gpu）；`number` 上有唯一索引 `uk_number`，并发取号撞 1062 时由 `asset.py` 自动重取序号重试 |
-| `inventory` | 资产主表（number, department, site, type, datetime, status, tag, notice, attachment_urls） |
+| `inventory` | 资产主表（id AUTO_INCREMENT, number, department, site, type, datetime, status, tag, notice, attachment_urls） |
 | `inventory_tmp` | 资产历史表（site 变更时自动备份） |
 | `budgets` | 年度预算表（budget_year, device_type, budget_amount） |
 | `purchase_orders` | 资产申请单据表（表名沿用 purchase_orders；order_no, order_date, device_type, spec, quantity, unit_price, amount, in_budget, pushed...） |
@@ -120,8 +127,10 @@
   避免「只存在于 device_list 的资产」带出的 `device_list.id` 与 `inventory.id` 同号时误改无关记录。
 - **资产看板**：只读台账计算指标；下推时把台账资产绑定到 `asset_cards.asset_number`。
 - **`app/ledger.py`**：口径常量（新机编码阈值、库存托管人、流转标签分组、`INVENTORY_STATUSES` 资产状态词表）
-  与派生函数（`inventory_index` / `stock_count` / `purchased_count` / `card_state` / `live_card_fields`）的唯一归属，
+  与派生函数（`inventory_index` / `stock_count_until` / `purchased_count_until` / `card_state` / `live_card_fields`）的唯一归属，
   避免同一规则在多个蓝图里各写一份。
+- **`app/common.py`**：登录检查（`login_required_api` / `login_required_page`）、连接生命周期与异常转 JSON
+  （`with_db`）的跨蓝图统一实现，三个业务蓝图不再各写一份样板。
 - **无手动同步**：`asset_cards` 中已绑定卡片的规格 / SN / 所属人 / 所属部门 / 领取时间 / 状态只是台账派生快照，
   统一在读取时刷新；未绑定（待分配）卡片的字段仍由人工维护。看板与变更模块之间因此不存在数据滞后。
 - **权限分层**：未登录用户可只读查看看板与查询接口；单据增删改、下推 / 撤销下推、卡片编辑、预算维护均需登录
@@ -176,35 +185,50 @@ S3_EXTERNAL_URL=http://外部访问地址:9001
 SECRET_KEY=Flask会话密钥
 
 # 可选：不填则使用默认值
+S3_BUCKET=zcsystem          # 附件存储桶名
+SESSION_COOKIE_SECURE=0     # HTTPS 部署时设 1，禁止 cookie 走明文信道
 PORT=5001
 HOST=0.0.0.0
-FLASK_DEBUG=1
+FLASK_DEBUG=0               # 默认关闭；开发机需要调试器/热重载时显式设 1
 ```
 
 ## 安装与运行
 
 ```bash
-# 安装依赖
+# 安装依赖（含 dev 组：pytest / ruff）
 uv sync
 
-# 启动开发服务器
-uv run python run.py
+# 启动开发服务器（调试模式需显式 FLASK_DEBUG=1）
+FLASK_DEBUG=1 uv run python run.py
 ```
 
 访问 `http://localhost:5001`。
+
+质量检查：
+
+```bash
+uv run ruff check .    # lint
+uv run pytest          # 单元测试（不连数据库）
+```
+
+`requirements.txt` 由 `uv export --no-hashes --no-dev --no-emit-project -o requirements.txt` 生成，
+供非 uv 环境（如服务器 pip）安装使用；**勿手工编辑**，依赖变更请改 `pyproject.toml` 后重新导出。
 
 默认端口是 **5001** 而不是 5000：macOS 的 5000 端口被系统「隔空播放接收器」（`ControlCenter`）占用，
 直接监听 5000 会报 `Address already in use`。确需 5000 时，可在「系统设置 → 通用 → 隔空投送与接力」
 关闭「隔空播放接收器」，然后 `PORT=5000 uv run python run.py`。
 
-首次部署（或升级已有库）需要给资产编码加唯一索引，防止并发取号写入重复编码：
+首次部署（或升级已有库）需要执行两个幂等迁移：
 
 ```bash
 uv run python scripts/migrate_asset_register.py --check   # 只检查重复编码与索引状态
-uv run python scripts/migrate_asset_register.py           # 加 uk_number 唯一索引（幂等）
+uv run python scripts/migrate_asset_register.py           # 加 uk_number 唯一索引
+uv run python scripts/migrate_inventory_autoincrement.py  # inventory.id 改 AUTO_INCREMENT
 ```
 
-脚本会先列出重复编码并拒绝改表，重复数据需人工清理后重跑。
+前者会先列出重复编码并拒绝改表（重复数据需人工清理后重跑）；后者把历史上由应用层
+`MAX(id)+1` 分配的 `inventory.id` 改为数据库原子分配，消除并发撞主键风险
+（存量 `'0000-00-00'` 脏日期会在会话级放宽 sql_mode 后完成改表，并提示行数）。
 
 生产环境可使用 Gunicorn：
 
