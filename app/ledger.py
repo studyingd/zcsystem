@@ -166,31 +166,22 @@ def insert_ledger_assets(cursor, assets, register_date):
 
     ``assets`` 为 dict 列表，必须包含 number / type / spec / department / name，
     可选 sn / cpu / mem / disk / gpu / status（缺省按类型取 :func:`initial_status`）。
-    inventory.id 由应用层分配（该表非 AUTO_INCREMENT），在本函数内统一连续取号，
-    并使用 executemany 批量写入。cursor 需为 dictionary=True，事务由调用方 commit。
+    inventory.id 为 AUTO_INCREMENT（存量库用 scripts/migrate_inventory_autoincrement.py
+    迁移），逐行插入并用 lastrowid 回写，不再应用层 MAX(id)+1 取号（并发会撞主键）。
+    cursor 需为 dictionary=True，事务由调用方 commit。
 
     返回写入的资产编码列表。
     """
     if not assets:
         return []
 
-    cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM inventory")
-    next_id = int(cursor.fetchone()['next_id'])
-
     device_rows = []
-    inventory_rows = []
-    for offset, item in enumerate(assets):
-        device_type = item['type']
+    for item in assets:
         device_rows.append((
-            device_type, item['number'], item.get('spec') or '',
+            item['type'], item['number'], item.get('spec') or '',
             item.get('department') or '', item.get('name') or '',
             item.get('sn') or '', item.get('cpu') or '', item.get('mem') or '',
             item.get('disk') or '', item.get('gpu') or '',
-        ))
-        inventory_rows.append((
-            next_id + offset, item['number'], item.get('department') or '',
-            item.get('name') or '', device_type, register_date,
-            item.get('status') or initial_status(device_type), INITIAL_TAG, '', '',
         ))
 
     cursor.executemany(
@@ -198,11 +189,14 @@ def insert_ledger_assets(cursor, assets, register_date):
         "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
         device_rows
     )
-    cursor.executemany(
-        "INSERT INTO inventory (id, number, department, site, type, datetime, status, tag, notice, attachment_urls) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-        inventory_rows
-    )
+    for item in assets:
+        cursor.execute(
+            "INSERT INTO inventory (number, department, site, type, datetime, status, tag, notice, attachment_urls) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            (item['number'], item.get('department') or '', item.get('name') or '',
+             item['type'], register_date,
+             item.get('status') or initial_status(item['type']), INITIAL_TAG, '', '')
+        )
     return [item['number'] for item in assets]
 
 
@@ -227,15 +221,26 @@ def latest_inventory_rows(cursor, numbers):
     return latest
 
 
-def inventory_index(cursor):
+def inventory_index(cursor, numbers=None):
     """inventory 按资产编号归并。
 
     返回 (latest, receive)：latest 为每个编号最新一条流转记录，
     receive 为最近一次领用类标签（入职/领用/更换）记录的日期。
+
+    ``numbers`` 为 None 时扫全表（仅限确实需要全量口径的场景，如部门领用
+    总览）；否则按编号集合下推 WHERE number IN (...) 过滤，避免看板详情类
+    接口每次把全表加载进内存。
     """
-    cursor.execute(
-        "SELECT number, department, site, type, datetime, status, tag, notice FROM inventory"
-    )
+    sql = "SELECT number, department, site, type, datetime, status, tag, notice FROM inventory"
+    params = ()
+    if numbers is not None:
+        numbers = list(numbers)
+        if not numbers:
+            return {}, {}
+        placeholders = ','.join(['%s'] * len(numbers))
+        sql += f" WHERE number IN ({placeholders})"
+        params = tuple(numbers)
+    cursor.execute(sql, params)
     latest = {}
     receive = {}
     for row in cursor.fetchall():
@@ -263,10 +268,11 @@ def fetch_devices(cursor, numbers):
 
 
 def yymm_of(value):
-    """date/datetime -> 'YYMM'，与台账编号第 3-6 位（年月码）对齐。"""
+    """date/datetime/'YYYY-MM' -> 'YYMM'，与台账编号第 3-6 位（年月码）对齐。"""
     if hasattr(value, 'strftime'):
         return value.strftime('%y%m')
-    return (value or '').replace('-', '')[:6]
+    digits = (value or '').replace('-', '')
+    return digits[2:6] if len(digits) >= 6 else ''
 
 
 def purchased_count_until(cursor, device_type, year, yymm):
@@ -374,7 +380,13 @@ def dept_usage_matrix(cursor, device_types=None, month_from=None, month_to=None)
         if month_from > month_to:
             month_from, month_to = month_to, month_from
         return _dept_usage_range(cursor, types, month_from, month_to, months)
-    latest, _receive = inventory_index(cursor)
+    # 只有带领用类流转的编号才可能计入矩阵，先筛编号再取各自最新流转，避免全表扫描
+    cursor.execute(
+        "SELECT DISTINCT number FROM inventory WHERE tag IN ({})".format(
+            ','.join(['%s'] * len(METRIC_TAGS))),
+        tuple(METRIC_TAGS)
+    )
+    latest, _receive = inventory_index(cursor, [r['number'] for r in cursor.fetchall()])
     if not latest:
         return {'types': types, 'departments': [], 'cells': {}, 'details': {},
                 'months': months, 'mode': 'current', 'month_from': '', 'month_to': ''}

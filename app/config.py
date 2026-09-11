@@ -1,9 +1,9 @@
-import mysql.connector
-from mysql.connector import Error, pooling
+import logging
+import os
+
 import boto3
 from botocore.client import Config
-import os
-import logging
+from mysql.connector import Error, pooling
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,8 @@ def get_db_connection():
 
 
 S3_EXTERNAL_URL = os.environ.get('S3_EXTERNAL_URL', os.environ['S3_ENDPOINT'])
+# 附件存储桶：默认 zcsystem，可用环境变量覆盖，避免桶名硬编码在业务代码里
+S3_BUCKET = os.environ.get('S3_BUCKET', 'zcsystem')
 
 
 def get_s3_client():

@@ -39,9 +39,10 @@ CREATE TABLE IF NOT EXISTS device_list (
   KEY idx_dept_name (department, name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
--- 资产主表：id 由应用层 MAX(id)+1 分配，因此不是 AUTO_INCREMENT
+-- 资产主表：id 为自增主键（存量库用 scripts/migrate_inventory_autoincrement.py 迁移，
+-- 历史上由应用层 MAX(id)+1 分配，并发会撞主键，已废弃）
 CREATE TABLE IF NOT EXISTS inventory (
-  id              INT PRIMARY KEY,
+  id              INT AUTO_INCREMENT PRIMARY KEY,
   number          VARCHAR(32)  NOT NULL DEFAULT '',
   department      VARCHAR(64)  NOT NULL DEFAULT '',
   site            VARCHAR(64)  NOT NULL DEFAULT '',

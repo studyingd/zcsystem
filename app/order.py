@@ -6,13 +6,15 @@
 """
 
 import logging
+from bisect import bisect_right
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
 from flask import Blueprint, jsonify, request, session
 from mysql.connector import Error
 
-from .config import get_db_connection
+from .common import denied as _denied
+from .common import with_db as _with_db
 from .ledger import (
     CARD_IN_STOCK,
     CARD_STATUSES,
@@ -25,16 +27,25 @@ from .ledger import (
     STOCK_CUSTODIAN_DEPT,
     STOCK_CUSTODIAN_NAME,
     STOCK_TAGS,
-    date_str as _ledger_date_str,
     dept_usage_matrix,
     fetch_devices,
     insert_ledger_assets,
-    inventory_index as _inventory_index,
     live_card_fields,
     next_asset_numbers,
+)
+from .ledger import (
+    inventory_index as _inventory_index,
+)
+from .ledger import (
     purchased_count_until as _purchased_count_until,
+)
+from .ledger import (
     stock_count_until as _stock_count_until,
+)
+from .ledger import (
     year_code as _year_code,
+)
+from .ledger import (
     yymm_of as _yymm_of,
 )
 
@@ -49,14 +60,6 @@ def _current_user():
     return session.get('username') or ''
 
 
-def _denied():
-    return jsonify({'status': 'error', 'message': '未登录，请先登录'}), 401
-
-
-def _db_error():
-    return jsonify({'status': 'error', 'message': '数据库连接失败'}), 500
-
-
 def _money(value):
     if value is None or value == '':
         return 0.0
@@ -69,7 +72,7 @@ def _parse_money(text, field):
     try:
         value = Decimal(str(text).strip()).quantize(Decimal('0.01'))
     except (InvalidOperation, ValueError):
-        raise ValueError(f'{field}格式不正确')
+        raise ValueError(f'{field}格式不正确') from None
     if value < 0:
         raise ValueError(f'{field}不能为负数')
     return value
@@ -91,32 +94,7 @@ def _parse_date(text):
     try:
         return datetime.strptime(str(text).strip(), '%Y-%m-%d').date()
     except (ValueError, TypeError):
-        raise ValueError('日期格式应为 YYYY-MM-DD')
-
-
-def _with_db(handler):
-    """统一获取连接 / 关闭连接，避免每个视图重复 try-finally。"""
-    def wrapper(*args, **kwargs):
-        conn = get_db_connection()
-        if not conn:
-            return _db_error()
-        cursor = None
-        try:
-            cursor = conn.cursor(dictionary=True)
-            return handler(conn, cursor, *args, **kwargs)
-        except ValueError as e:
-            conn.rollback()
-            return jsonify({'status': 'error', 'message': str(e)}), 400
-        except Exception as e:
-            conn.rollback()
-            logger.error("%s 异常: %s", request.path, e, exc_info=True)
-            return jsonify({'status': 'error', 'message': '服务器内部错误'}), 500
-        finally:
-            if cursor:
-                cursor.close()
-            conn.close()
-    wrapper.__name__ = handler.__name__
-    return wrapper
+        raise ValueError('日期格式应为 YYYY-MM-DD') from None
 
 
 def _budget_totals(cursor, year):
@@ -157,15 +135,41 @@ def _until_label(until):
     return f'（截至 20{until[:2]}-{until[2:]}）' if until else ''
 
 
-def _budget_used_until(cursor, device_type, year, order_date, order_id):
-    """截至本单据（含本单）：同类型同年度「预算内」单据的金额累计。"""
+def _budget_used_series(cursor, years):
+    """一次性拉取各年度「预算内」单据，按 (年度, 类型) 预算好前缀累计金额。
+
+    返回 {(year, device_type): (keys, sums)}，keys 为升序的 (order_date, id)，
+    sums[i] 为截至 keys[i]（含）的累计金额。配合 :func:`_budget_used_at`
+    用二分查找定位，避免列表页每行单据各查一次 SUM（N+1）。
+    """
+    if not years:
+        return {}
+    placeholders = ','.join(['%s'] * len(years))
     cursor.execute(
-        "SELECT COALESCE(SUM(amount), 0) AS used FROM purchase_orders "
-        "WHERE in_budget=1 AND device_type=%s AND YEAR(order_date)=%s "
-        "AND (order_date < %s OR (order_date = %s AND id <= %s))",
-        (device_type, year, order_date, order_date, order_id)
+        f"SELECT id, device_type, YEAR(order_date) AS y, order_date, amount "
+        f"FROM purchase_orders WHERE in_budget=1 AND YEAR(order_date) IN ({placeholders}) "
+        f"ORDER BY order_date, id",
+        tuple(years)
     )
-    return _money(cursor.fetchone()['used'])
+    series = {}
+    running = {}
+    for r in cursor.fetchall():
+        key = (int(r['y']), r['device_type'])
+        running[key] = round(running.get(key, 0.0) + _money(r['amount']), 2)
+        keys, sums = series.setdefault(key, ([], []))
+        keys.append((r['order_date'], r['id']))
+        sums.append(running[key])
+    return series
+
+
+def _budget_used_at(series, device_type, year, order_date, order_id):
+    """截至本单据（含本单）：同类型同年度「预算内」单据的金额累计。"""
+    entry = series.get((int(year), device_type))
+    if not entry:
+        return 0.0
+    keys, sums = entry
+    idx = bisect_right(keys, (order_date, order_id))
+    return sums[idx - 1] if idx else 0.0
 
 
 def _card_counts(cursor, order_ids):
@@ -334,6 +338,11 @@ def list_orders(conn, cursor):
 
     stock_cache, purchased_cache, budget_cache = {}, {}, {}
     card_counts = _card_counts(cursor, [r['id'] for r in rows])
+    # 预算已用改为批量预算前缀和，避免每行单据各查一次 SUM
+    budget_series = _budget_used_series(
+        cursor,
+        sorted({r['order_date'].year for r in rows if hasattr(r['order_date'], 'year')})
+    )
 
     orders = []
     for row in rows:
@@ -354,7 +363,7 @@ def list_orders(conn, cursor):
             'stock_count': stock_cache[(dtype, str(order_date))],
             'purchased_this_year': purchased_cache[(dtype, yymm)],
             'budget': _budget_view(dtype, order_year, totals,
-                                   _budget_used_until(cursor, dtype, order_year, order_date, row['id'])),
+                                   _budget_used_at(budget_series, dtype, order_year, order_date, row['id'])),
         }))
 
     summary = {
@@ -380,7 +389,7 @@ def _enrich_cards(cursor, cards):
     if not numbers:
         return cards
     devices = fetch_devices(cursor, numbers)
-    inv_latest, inv_receive = _inventory_index(cursor)
+    inv_latest, inv_receive = _inventory_index(cursor, numbers)
     for card in cards:
         device = devices.get(card['asset_number'])
         if not device:
@@ -419,7 +428,8 @@ def order_detail(conn, cursor, order_id):
         'stock_count': _stock_count_until(cursor, dtype, row['order_date']),
         'purchased_this_year': _purchased_count_until(cursor, dtype, order_year, _yymm_of(row['order_date'])),
         'budget': _budget_view(dtype, order_year, totals,
-                               _budget_used_until(cursor, dtype, order_year, row['order_date'], row['id'])),
+                               _budget_used_at(_budget_used_series(cursor, [order_year]),
+                                               dtype, order_year, row['order_date'], row['id'])),
     })
     return jsonify({'status': 'success', 'order': data, 'cards': cards})
 
@@ -552,9 +562,10 @@ def set_order_review(conn, cursor, order_id):
     if _current_user() is None:
         return _denied()
     reviewed = 1 if request.form.get('reviewed') in ('1', 'true', 'True') else 0
-    cursor.execute("UPDATE purchase_orders SET reviewed=%s WHERE id=%s", (reviewed, order_id))
-    if cursor.rowcount == 0:
+    cursor.execute("SELECT id FROM purchase_orders WHERE id=%s", (order_id,))
+    if not cursor.fetchone():
         return jsonify({'status': 'error', 'message': '单据不存在'}), 404
+    cursor.execute("UPDATE purchase_orders SET reviewed=%s WHERE id=%s", (reviewed, order_id))
     conn.commit()
     return jsonify({'status': 'success', 'reviewed': bool(reviewed)})
 
@@ -580,7 +591,7 @@ def push_order(conn, cursor, order_id):
     try:
         datetime.strptime(card_month, '%Y-%m')
     except ValueError:
-        raise ValueError('卡片月份格式应为 YYYY-MM')
+        raise ValueError('卡片月份格式应为 YYYY-MM') from None
 
     quantity = int(order['quantity'])
     push_date = date.today()
@@ -706,7 +717,7 @@ def update_card(conn, cursor, card_id):
         device = fetch_devices(cursor, [asset_number]).get(asset_number)
         if not device:
             return jsonify({'status': 'error', 'message': f'台账中不存在资产编码 {asset_number}'}), 400
-        inv_latest, inv_receive = _inventory_index(cursor)
+        inv_latest, inv_receive = _inventory_index(cursor, [asset_number])
         live = live_card_fields(
             device, inv_receive.get(asset_number), inv_latest.get(asset_number)
         )
@@ -787,7 +798,7 @@ def dept_usage(conn, cursor):
 
 
 def _usage_rows(cursor, device_type, year, department=None, until=None):
-    sql = "SELECT {} FROM device_list WHERE type=%s AND SUBSTRING(number, 3, 2)=%s".format(DEVICE_FIELDS)
+    sql = f"SELECT {DEVICE_FIELDS} FROM device_list WHERE type=%s AND SUBSTRING(number, 3, 2)=%s"
     params = [device_type, _year_code(year)]
     if until:
         sql += " AND SUBSTRING(number, 3, 4) <= %s"
@@ -810,7 +821,7 @@ def type_usage(conn, cursor):
         return jsonify({'status': 'error', 'message': '缺少设备类型或年度参数'}), 400
 
     rows = _usage_rows(cursor, device_type, int(year), until=until)
-    inv_latest, inv_receive = _inventory_index(cursor)
+    inv_latest, inv_receive = _inventory_index(cursor, [r['number'] for r in rows])
 
     grouped = {}
     for row in rows:
@@ -859,7 +870,7 @@ def dept_users(conn, cursor):
         return jsonify({'status': 'error', 'message': '缺少设备类型或年度参数'}), 400
 
     rows = _usage_rows(cursor, device_type, int(year), department=department, until=until)
-    inv_latest, inv_receive = _inventory_index(cursor)
+    inv_latest, inv_receive = _inventory_index(cursor, [r['number'] for r in rows])
 
     data = []
     for row in rows:
