@@ -1,0 +1,52 @@
+/* index/responsive.css — 响应式断点：大屏/平板/小屏/触屏命中区 ≥44px */
+/* 大屏：维持满屏宽，仅适度加大内边距 */
+@media (min-width: 1440px) {
+    .container {
+        padding: 28px 36px 48px;
+    }
+}
+
+/* 平板：收紧容器与模块内边距 */
+@media (max-width: 1024px) {
+    .container {
+        padding: 20px;
+    }
+
+    .module {
+        padding: 18px;
+    }
+}
+
+/* 小屏：进一步压缩，表格降字号 */
+@media (max-width: 375px) {
+    .container {
+        padding: 14px 12px 28px;
+    }
+
+    .module {
+        padding: 12px;
+    }
+
+    .data-table th,
+    .data-table td {
+        padding: 6px 4px;
+        font-size: 12px;
+    }
+}
+
+/* 触屏设备：所有图标/分页按钮命中区统一 ≥44×44 */
+@media (pointer: coarse) {
+    .detail-action-btn,
+    .modal-close-btn,
+    .preview-remove,
+    .attachment-detail-remove,
+    .history-delete-btn,
+    .export-icon,
+    .preview-page-btn,
+    .preview-back-btn,
+    .month-quick-btn {
+        min-width: 44px;
+        min-height: 44px;
+    }
+}
+

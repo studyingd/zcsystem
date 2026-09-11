@@ -74,5 +74,9 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="/static/js/index.js?v=19"></script>
+<!-- 原 index.js 按职责拆分为 4 个分片，顺序加载共享全局作用域（语义与原单文件一致） -->
+<script src="/static/js/index/overview.js?v=20"></script>
+<script src="/static/js/index/query.js?v=20"></script>
+<script src="/static/js/index/detail-render.js?v=20"></script>
+<script src="/static/js/index/detail-actions.js?v=20"></script>
 {% endblock %}

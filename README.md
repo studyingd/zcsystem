@@ -36,8 +36,8 @@
   ≤1024px 时侧边栏改为抽屉（汉堡按钮 + 遮罩 + Esc 关闭）。
 - 视觉体系参考 ui-ux-pro-max 的「Minimalism & Swiss Style」浅色企业方案：
   navy 主色 `#1E3A5F`、蓝色链接 `#2563EB`、绿色语义色 `#059669`、浅灰背景 `#F8FAFC`；
-  设计令牌集中在 `static/css/index.css` 的 `:root`，卡片/表格以 1px 边框代替重阴影。
-- 表单控件统一在 `static/css/index.css` 管控：38px 高度（紧凑场景 34px）、8px 圆角、
+  设计令牌集中在 `static/css/index/tokens.css` 的 `:root`，卡片/表格以 1px 边框代替重阴影。
+- 表单控件统一在 `static/css/index/forms.css` 管控：38px 高度（紧凑场景 34px）、8px 圆角、
   悬浮 `#CBD5E1` 边框、聚焦蓝色边框 + 3px 焦点环；`select` 去掉系统默认外观，改用内联 SVG 箭头；
   复选框/单选框使用 `accent-color`。页面级样式不再各自覆写控件外观。
 - 无障碍：跳转主内容链接、`aria-current` 当前导航、图标按钮均带 `aria-label`、
@@ -71,13 +71,19 @@
 │   └── asset_register.html # 资产登记页
 ├── static/
 │   ├── favicon.svg         # 品牌 favicon（与侧边栏/登录页 logo 同源）
-│   ├── css/                # index/dashboard/asset_register/login 样式
+│   ├── css/
+│   │   ├── index/          # 全局样式（原 index.css 按职责拆为 11 片，加载顺序即原章节顺序）
+│   │   │                   # tokens/base/forms/buttons/modal/responsive/query/detail/shell/components/shared
+│   │   ├── dashboard.css   # 看板单据视图样式
+│   │   ├── asset_register.css # 资产登记页样式
+│   │   └── login.css       # 登录页样式
 │   ├── js/
 │   │   ├── utils.js        # 跨页共享工具与词表（读取 #zcMeta，含兜底常量）
 │   │   ├── modal.js        # 公共弹窗组件（Esc/遮罩关闭、焦点陷阱、aria）
-│   │   ├── index.js        # 资产变更与查询交互
+│   │   ├── index/          # 资产变更与查询交互（原 index.js 拆为 4 片顺序加载，共享全局作用域）
+│   │   │                   # overview/query/detail-render/detail-actions
 │   │   ├── asset_register.js   # 资产登记交互
-│   │   └── dashboard_orders.js # 单据看板交互
+│   │   └── dashboard_orders.js # 单据看板交互（单 IIFE 模块，内部状态私有，不再拆分）
 ├── scripts/
 │   ├── init_db.sql         # 基础表结构
 │   ├── init_documents.sql  # 单据/预算/资产卡片表结构

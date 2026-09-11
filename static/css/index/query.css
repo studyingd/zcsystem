@@ -1,0 +1,76 @@
+/* index/query.css — 资产查询结果卡片 */
+/* 查询结果卡片样式 */
+.query-card-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.query-card {
+    background: #fff;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 15px;
+    cursor: pointer;
+    transition: box-shadow 0.2s, transform 0.1s;
+}
+
+.query-card:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+    transform: translateY(-2px);
+}
+
+.query-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #eee;
+}
+
+.query-card-number {
+    font-weight: 700;
+    color: var(--color-primary);
+    font-family: monospace;
+    font-size: 15px;
+}
+
+.query-card-status {
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 500;
+}
+
+.status-done { background: #d4edda; color: #155724; }
+.status-pending { background: #fff3cd; color: #856404; }
+.status-none { background: #e2e3e5; color: #383d41; }
+
+.query-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.query-card-field {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+}
+
+.query-card-field label {
+    color: #6c757d;
+    min-width: 70px;
+}
+
+.query-card-field span {
+    color: #333;
+    font-weight: 500;
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+

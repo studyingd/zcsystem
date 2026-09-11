@@ -1,0 +1,61 @@
+/* index/tokens.css — 设计令牌（色板/字体/间距）+ 全局焦点可见与减少动效偏好 */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: var(--font-sans);
+}
+
+/* === 设计 Token：ui-ux-pro-max「Minimalism & Swiss Style」浅色企业体系 === */
+:root {
+    --color-primary: #1e3a5f;
+    --color-primary-hover: #16304f;
+    --color-primary-rgb: 30, 58, 95;
+    --color-secondary: #2563eb;
+    --color-secondary-rgb: 37, 99, 235;
+    --color-accent: #059669;
+    --color-bg: #f8fafc;
+    --color-surface: #ffffff;
+    --color-text: #0f172a;
+    --color-heading: #0f172a;
+    --color-muted: #475569;
+    --color-muted-soft: #64748b;
+    --color-border: #e4e7eb;
+    --color-border-light: #eef1f4;
+    --color-danger: #dc2626;
+    --color-danger-hover: #b91c1c;
+    --color-success: #059669;
+    --color-success-hover: #047857;
+    --color-warning: #b45309;
+    --radius: 8px;
+    --radius-sm: 6px;
+    --ring: 0 0 0 3px rgba(var(--color-primary-rgb), 0.16);
+    --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+    --shadow-md: 0 4px 16px rgba(15, 23, 42, 0.08);
+    --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --sidebar-width: 232px;
+    --sidebar-collapsed-width: 68px;
+    --topbar-height: 56px;
+    --control-height: 38px;
+    --control-height-sm: 34px;
+    --chevron-svg: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+}
+
+/* === 无障碍：键盘焦点可见 + 尊重减少动效偏好 === */
+:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+    .container.page-enter, .container.page-exit { animation: none !important; }
+}
+

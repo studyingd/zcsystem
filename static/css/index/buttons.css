@@ -1,0 +1,325 @@
+/* index/buttons.css — 按钮组件：主/次按钮及尺寸变体 */
+/* === 按钮组件：主 / 次 ===
+   页面里的 .btn-primary / .btn-secondary 统一走这里，
+   避免落到上面裸 button 的深蓝底 + 白字默认样式。 */
+.btn-primary,
+.btn-secondary {
+    margin-right: 0;
+    padding: 0 18px;
+    min-height: var(--control-height);
+    border-radius: var(--radius-sm);
+    font-size: 14px;
+    font-weight: 500;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.btn-primary {
+    background: var(--color-primary);
+    border: 1px solid var(--color-primary);
+    color: #fff;
+}
+
+.btn-primary:hover:not(:disabled) {
+    background: var(--color-primary-hover);
+    border-color: var(--color-primary-hover);
+}
+
+.btn-secondary {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    color: var(--color-text);
+}
+
+.btn-secondary:hover:not(:disabled) {
+    background: var(--color-bg);
+    border-color: var(--color-secondary);
+    color: var(--color-secondary);
+}
+
+.overview-cards {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin: 20px 0;
+}
+
+.overview-card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 16px 22px;
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+    min-width: 160px;
+    user-select: none;
+}
+
+.overview-card:hover {
+    border-color: var(--color-primary);
+    box-shadow: 0 2px 8px rgba(var(--color-primary-rgb), 0.14);
+    transform: translateY(-1px);
+}
+
+.overview-card.active {
+    border-color: var(--color-primary);
+    background: #f0f6ff;
+}
+
+.overview-card-count {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--color-primary);
+    line-height: 1;
+}
+
+.overview-card-label {
+    font-size: 14px;
+    color: #495057;
+    font-weight: 500;
+}
+
+.preview-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.preview-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: #34495e;
+}
+
+.preview-back-btn {
+    padding: 6px 14px;
+    background: #e9ecef;
+    color: #495057;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    margin: 0;
+    transition: all 0.2s;
+}
+
+.preview-back-btn:hover {
+    background: #ced4da;
+}
+
+.preview-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid #e9ecef;
+    grid-column: 1 / -1;
+}
+
+.preview-page-btn {
+    padding: 6px 12px;
+    background: #fff;
+    color: #495057;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    margin: 0;
+    min-width: 36px;
+    transition: all 0.2s;
+}
+
+.preview-page-btn:hover:not(:disabled):not(.active) {
+    border-color: var(--color-primary);
+    color: var(--color-primary);
+}
+
+.preview-page-btn.active {
+    background: var(--color-primary);
+    color: #fff;
+    border-color: var(--color-primary);
+}
+
+.preview-page-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 15px 0;
+    font-size: 14px;
+    background: white;
+    border-radius: 6px;
+    overflow: hidden;
+    border: 1px solid var(--color-border);
+}
+
+.data-table th,
+.data-table td {
+    border: 1px solid var(--color-border-light);
+    padding: 12px 15px;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.data-table th:nth-child(5),
+.data-table td:nth-child(5),
+.data-table th:nth-child(7),
+.data-table td:nth-child(7) {
+    min-width: 150px;
+    width: 150px;
+}
+
+.data-table th:nth-child(4),
+.data-table td:nth-child(4) {
+    max-width: 200px;
+    min-width: 150px;
+    white-space: normal !important;
+    word-break: break-all;
+    vertical-align: middle;
+}
+
+.data-table th:nth-child(8),
+.data-table td:nth-child(8) {
+    min-width: 200px;
+    max-width: 300px;
+}
+
+.data-table th {
+    background: var(--color-bg);
+    color: var(--color-muted);
+    font-weight: 600;
+    position: sticky;
+    top: 0;
+}
+
+.data-table tr:nth-child(even) {
+    background: #fafbfc;
+}
+
+.data-table tr:hover {
+    background: #f1f5f9;
+}
+
+.empty-tip {
+    color: var(--color-muted-soft);
+    padding: 40px;
+    text-align: center;
+    font-size: 14px;
+}
+
+.query-group {
+    display: flex;
+    align-items: center;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.query-group label {
+    width: auto;
+    margin-right: 5px;
+}
+
+.query-group select,
+.query-group input {
+    flex: none;
+    width: 200px;
+}
+
+.query-group button {
+    flex: none;
+}
+
+.edit-input {
+    width: 100%;
+    min-height: var(--control-height-sm);
+    padding: 6px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+}
+
+select.edit-input {
+    width: 100%;
+    min-width: 100%;
+    box-sizing: border-box;
+}
+
+select.edit-input:not([size]):not([multiple]) {
+    padding-right: 32px;
+    background-position: right 10px center;
+}
+
+textarea.edit-input {
+    resize: vertical;
+    min-height: 60px;
+    max-height: 150px;
+}
+
+.msg-box {
+    margin-top: 15px;
+    padding: 10px;
+    border-radius: 6px;
+    font-size: 14px;
+}
+
+.msg-success {
+    background: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+.msg-error {
+    background: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+}
+
+.msg-warning {
+    background: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffeeba;
+}
+
+.operate-btn-group {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+}
+
+.operate-btn-group button {
+    padding: 8px 12px;
+    margin: 0;
+    white-space: nowrap;
+    writing-mode: horizontal-tb;
+    text-orientation: mixed;
+    width: auto;
+    height: auto;
+    font-size: 14px;
+    line-height: 1.2;
+}
+
+.custom-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+}
+

@@ -1,0 +1,85 @@
+/* index/base.css — 基础修正（hidden 优先级）与页面切换动画 */
+/* === 基础修正：hidden 属性必须胜过作者样式的 display ===
+   浏览器默认的 [hidden]{display:none} 来自 UA 样式表，任何作者规则（如
+   .form-group{display:block}、.field-error{display:block}）都会把它盖掉，
+   导致靠 hidden 控制显隐的条件字段一直可见。统一在这里兜底。 */
+[hidden] {
+    display: none !important;
+}
+
+body {
+    background-color: var(--color-bg);
+    color: var(--color-text);
+    font-size: 14px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+}
+
+.container {
+    padding: 24px 28px 40px;
+    min-height: calc(100vh - var(--topbar-height));
+}
+
+/* 页面切换动画 */
+.container.page-enter {
+    animation: pageEnter 0.35s ease-out both;
+}
+
+.container.page-exit {
+    animation: pageExit 0.2s ease-in both;
+}
+
+@keyframes pageEnter {
+    from {
+        opacity: 0;
+        transform: translateY(12px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes pageExit {
+    from {
+        opacity: 1;
+        transform: translateY(0);
+    }
+    to {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+}
+
+h2 {
+    color: var(--color-heading);
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--color-border-light);
+    font-size: 1.15em;
+}
+
+.module {
+    margin-bottom: 35px;
+    padding: 25px;
+    background: var(--color-surface);
+    border-radius: var(--radius);
+    border: 1px solid var(--color-border);
+    box-shadow: var(--shadow-sm);
+    overflow-x: auto;
+}
+
+.form-group {
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+}
+
+label {
+    display: inline-block;
+    width: 120px;
+    font-weight: 600;
+    color: var(--color-muted);
+    margin-right: 10px;
+}
+

@@ -1,0 +1,71 @@
+/* index/components.css — 组件刷新：语义色/边框替代阴影/等宽数字 */
+/* ==========================================================
+   组件刷新：语义色 / 边框替代阴影 / 等宽数字
+   ========================================================== */
+.query-card,
+.overview-card,
+.stat-card,
+.sum-item,
+.modal-content {
+    border: 1px solid var(--color-border);
+    box-shadow: var(--shadow-sm);
+}
+
+.query-card-number,
+.data-table td.num,
+.stat-card-value,
+.sum-value,
+.budget-left,
+.budget-sub {
+    font-variant-numeric: tabular-nums;
+}
+
+.query-card-number {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    letter-spacing: 0.01em;
+}
+
+.status-done { background: #d8f3e7; color: #065f46; }
+.status-pending { background: #fef3c7; color: #92400e; }
+.status-none { background: #e8ebef; color: #475569; }
+
+.msg-success {
+    background: #ecfdf5;
+    color: #065f46;
+    border: 1px solid #a7f3d0;
+}
+
+.msg-error {
+    background: #fef2f2;
+    color: #991b1b;
+    border: 1px solid #fecaca;
+}
+
+.msg-warning {
+    background: #fffbeb;
+    color: #92400e;
+    border: 1px solid #fde68a;
+}
+
+.custom-modal .modal-content {
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-md);
+}
+
+button {
+    border-radius: var(--radius-sm);
+}
+
+button:focus-visible,
+.nav-link:focus-visible,
+.topbar-action-btn:focus-visible,
+.sidebar-toggle:focus-visible {
+    outline: 2px solid var(--color-secondary);
+    outline-offset: 2px;
+}
+
+::selection {
+    background: rgba(37, 99, 235, 0.18);
+}
+

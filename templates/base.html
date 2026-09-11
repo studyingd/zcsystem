@@ -7,7 +7,18 @@
     <title>{% block title %}资产管理系统{% endblock %}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <link rel="stylesheet" href="/static/css/index.css?v=24">
+    <!-- 全局样式：原 index.css 按职责拆分，加载顺序即原文件章节顺序（级联等价） -->
+    <link rel="stylesheet" href="/static/css/index/tokens.css?v=25">
+    <link rel="stylesheet" href="/static/css/index/base.css?v=25">
+    <link rel="stylesheet" href="/static/css/index/forms.css?v=25">
+    <link rel="stylesheet" href="/static/css/index/buttons.css?v=25">
+    <link rel="stylesheet" href="/static/css/index/modal.css?v=25">
+    <link rel="stylesheet" href="/static/css/index/responsive.css?v=25">
+    <link rel="stylesheet" href="/static/css/index/query.css?v=25">
+    <link rel="stylesheet" href="/static/css/index/detail.css?v=25">
+    <link rel="stylesheet" href="/static/css/index/shell.css?v=25">
+    <link rel="stylesheet" href="/static/css/index/components.css?v=25">
+    <link rel="stylesheet" href="/static/css/index/shared.css?v=25">
     {% block extra_css %}{% endblock %}
 </head>
 
