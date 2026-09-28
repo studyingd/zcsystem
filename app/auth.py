@@ -141,7 +141,7 @@ def logout():
     return redirect(url_for('auth.login'))
 
 
-# 默认进入资产看板（无需登录）
+# 默认进入资产申请（无需登录）
 @auth_bp.route('/')
 def index():
     return redirect(url_for('dashboard.dashboard_page'))

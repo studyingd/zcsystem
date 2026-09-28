@@ -5,7 +5,7 @@
 - 资产登记 ``asset.py``：向 device_list + inventory 写入新资产（台账唯一新增入口）；
 - 资产变更 ``inventory.py``：更新 device_list / inventory 的使用人、部门、状态、标签等，
   并把变更前的记录备份到 inventory_tmp；
-- 资产看板 ``order.py``：只读台账，计算「今年已采购 / 剩余库存 / 部门使用情况」等指标，
+- 资产申请 ``order.py``：只读台账，计算「今年已采购 / 剩余库存 / 部门使用情况」等指标，
   下推时把台账资产绑定到 asset_cards。
 
 因此 device_list + inventory 是唯一事实来源。asset_cards 中已绑定卡片的
@@ -15,6 +15,8 @@
 
 from datetime import date, datetime
 
+from mysql.connector import Error
+
 # ---- 口径常量 ----
 # 新机起始编码：编码 >= 阈值视为新机，否则为旧机
 NEW_LAPTOP_THRESHOLD = 'DZ2508000'
@@ -22,8 +24,8 @@ NEW_MONITOR_THRESHOLD = 'DZ2403000'
 # 库存托管人：device_list 中挂在该部门/姓名下的设备视为在库
 STOCK_CUSTODIAN_DEPT = 'IT'
 STOCK_CUSTODIAN_NAME = '余嘉雄'
-# 计入「剩余库存」的流转标签
-STOCK_TAGS = ('入库', '离职')
+# 计入「剩余库存」的流转标签（设备退回即入库，不再单独区分离职退回）
+STOCK_TAGS = ('入库',)
 # 计入「已领用 / 使用明细」的流转标签
 METRIC_TAGS = ('入职', '领用', '更换')
 # 资产报废后打的流转标签（不计入库存，也不计入领用）
@@ -32,7 +34,7 @@ DEPRECATED_TAG = '弃用'
 ALL_TAGS = METRIC_TAGS + STOCK_TAGS + (DEPRECATED_TAG,)
 
 # ---- 台账资产状态（资产变更 / 查询模块共用词表）----
-INVENTORY_STATUSES = ('已录入', '未录入', '租聘', '借用', '入库', '无需录入', '报废')
+INVENTORY_STATUSES = ('已录入', '未录入', '租赁', '借用', '入库', '无需录入', '报废')
 
 # ---- 资产卡片状态 ----
 CARD_UNASSIGNED = '待分配'
@@ -46,9 +48,14 @@ STOCK_TYPE_THRESHOLDS = {
     '显示器': NEW_MONITOR_THRESHOLD,
 }
 
+# Mac 机单独计库存的类型：规格含 mac 关键字（忽略大小写）的台式主机 / 笔记本电脑
+# 与普通机分开统计，避免 MacBook / Mac mini 混进普通库存口径
+MAC_SPEC_KEYWORD = 'mac'
+MAC_SPLIT_TYPES = ('台式主机', '笔记本电脑')
+
 # ---- 资产登记（台账新增）口径 ----
-# 租聘台式主机使用 ZL 前缀，其余资产使用 DZ 前缀
-RENTAL_DESKTOP_TYPE = '租聘台式主机'
+# 租赁台式主机使用 ZL 前缀，其余资产使用 DZ 前缀
+RENTAL_DESKTOP_TYPE = '租赁台式主机'
 CODE_PREFIX_RENTAL = 'ZL'
 CODE_PREFIX_DEFAULT = 'DZ'
 CODE_LENGTH = 9
@@ -60,7 +67,9 @@ CUSTOM_TYPE_OPTION = '其它'
 ASSET_TYPES = ('台式主机', RENTAL_DESKTOP_TYPE, '笔记本电脑', '显示器', CUSTOM_TYPE_OPTION)
 # 需要填写硬件配置（CPU / 内存 / 硬盘 / 显卡）的类型
 CONFIG_TYPES = ('笔记本电脑', '台式主机', RENTAL_DESKTOP_TYPE)
-# 租聘机规格默认值（前端仅在规格为空时回填，不覆盖用户已输入内容）
+# 单据新增页可选的设备类型（其余类型经「其它」自定义输入）
+ORDER_DEVICE_TYPES = ('显示器', '笔记本电脑', '台式主机')
+# 租赁机规格默认值（前端仅在规格为空时回填，不覆盖用户已输入内容）
 RENTAL_DEFAULT_SPEC = 'EDY易点云'
 
 # 部门领用总览矩阵的设备类型列（顺序即看板展示顺序）
@@ -70,11 +79,11 @@ USAGE_MATRIX_TYPES = ('笔记本电脑', '台式主机', RENTAL_DESKTOP_TYPE, '�
 DEPARTMENTS = ('FIN', 'HR', 'SCM', 'STU', 'GMO', 'COM', 'CSG', 'PMD', 'IT', 'SMG', '证券事务部')
 
 # 台账新增时写入 inventory 的初始流转：
-# 租聘机在「资产状态」维度归入租聘（资产变更页按状态分桶时单独展示），
+# 租赁机在「资产状态」维度归入租赁（资产变更页按状态分桶时单独展示），
 # 但流转标签仍是入库 —— 看板库存按 tag 统计，两者口径不同是有意为之。
 INITIAL_TAG = '入库'
 INITIAL_STATUS_DEFAULT = '入库'
-INITIAL_STATUS_RENTAL = '租聘'
+INITIAL_STATUS_RENTAL = '租赁'
 
 # 单次批量登记数量上限（后端强校验，前端 max 只是提示）
 MAX_REGISTER_BATCH = 200
@@ -95,17 +104,25 @@ BRAND_ICONS = (
 )
 
 DEVICE_FIELDS = 'number, spec, sn, department, name, cpu, mem, disk, gpu'
-_TAGS_SQL = ','.join(['%s'] * len(STOCK_TAGS))
 
 
 def asset_prefix(device_type):
-    """台账编码前缀：租聘台式主机为 ZL，其余为 DZ。"""
+    """台账编码前缀：租赁台式主机为 ZL，其余为 DZ。"""
     return CODE_PREFIX_RENTAL if device_type == RENTAL_DESKTOP_TYPE else CODE_PREFIX_DEFAULT
 
 
 def initial_status(device_type):
     """台账新增时 inventory 的初始资产状态。"""
     return INITIAL_STATUS_RENTAL if device_type == RENTAL_DESKTOP_TYPE else INITIAL_STATUS_DEFAULT
+
+
+def requires_config(device_type):
+    """该设备类型是否必须填写硬件配置（CPU / 内存 / 硬盘 / 显卡）。
+
+    资产登记与单据新增共用同一判定；电脑类（含租赁台式主机）的配置会写入
+    device_list 的 cpu / mem / disk / gpu，资产登记 / 变更页据此展示。
+    """
+    return device_type in CONFIG_TYPES
 
 
 def yymm_from_month(value):
@@ -285,11 +302,28 @@ def purchased_count_until(cursor, device_type, year, yymm):
     return int(cursor.fetchone()['cnt'])
 
 
-def stock_count_until(cursor, device_type, as_of):
-    """截至 as_of 当日处于在库状态的资产数（按编号去重）。
+def is_mac_spec(spec):
+    """规格型号是否为 Mac 机（含 mac 关键字，忽略大小写）。
 
-    取不晚于 as_of 的最后一条流转记录判断：标签为入库/离职视为在库；
+    仅对 :data:`MAC_SPLIT_TYPES` 内的类型使用；订单与台账其规格型号包含
+    MacBook / iMac / Mac mini / MAC 等字样时均命中。
+    """
+    return MAC_SPEC_KEYWORD in (spec or '').lower()
+
+
+def _in_stock_rows(cursor, device_type, as_of, mac=None):
+    """口径核心：截至 as_of 在库的资产（最新流转行，按编号去重）。
+
+    取不晚于 as_of 的最后一条流转记录判断：标签为入库视为在库；
     as_of 之前尚无流转记录的资产视为尚未入账，不计入。
+
+    ``mac`` 仅对台式主机 / 笔记本电脑有意义（规格含 mac 关键字）：
+    True 只统计 Mac 机，False 排除之，None 不区分（全口径）；
+    其余类型忽略该参数，始终全口径。
+
+    规格存在 device_list（与 inventory 排序规则不一致，SQL JOIN 会报
+    1267 Illegal mix of collations），因此拆两次单表查询、Python 侧对齐；
+    仅 mac 过滤时才查规格，全口径不增加额外查询。
     """
     cursor.execute(
         "SELECT number, datetime, tag FROM inventory WHERE type=%s AND datetime <= %s",
@@ -300,11 +334,138 @@ def stock_count_until(cursor, device_type, as_of):
         prev = latest.get(row['number'])
         if prev is None or (row['datetime'] or date.min) >= (prev['datetime'] or date.min):
             latest[row['number']] = row
-    numbers = {n for n, r in latest.items() if r['tag'] in STOCK_TAGS}
+    rows = list(latest.values())
+    rows = [r for r in rows if r['tag'] in STOCK_TAGS]
     threshold = STOCK_TYPE_THRESHOLDS.get(device_type)
     if threshold:
-        numbers = {n for n in numbers if n >= threshold}
-    return len(numbers)
+        rows = [r for r in rows if r['number'] >= threshold]
+    if mac is not None and device_type in MAC_SPLIT_TYPES:
+        cursor.execute(
+            "SELECT number, spec FROM device_list WHERE type=%s",
+            (device_type,)
+        )
+        specs = {r['number']: (r['spec'] or '') for r in cursor.fetchall()}
+        # 台账里存在但 device_list 没有的资产（specs 缺项）视为非 Mac
+        rows = [r for r in rows if is_mac_spec(specs.get(r['number'])) == mac]
+    return rows
+
+
+def stock_count_until(cursor, device_type, as_of, mac=None):
+    """截至 as_of 当日处于在库状态的资产数（口径见 :func:`_in_stock_rows`）。"""
+    return len(_in_stock_rows(cursor, device_type, as_of, mac))
+
+
+def stock_counts_by_type(cursor, device_types, as_of):
+    """一次窗口查询批量算出多类型在库数，口径与 :func:`stock_count_until` 一致。
+
+    返回 ``{(type, mac): 数量}``：非 Mac 拆分类型 mac 恒为 ``None``；
+    Mac 拆分类型（:data:`MAC_SPLIT_TYPES`）按 ``True / False`` 分桶。
+
+    ``list_orders`` 每次请求会对每个出现过的 (类型, Mac池) 调一次
+    :func:`stock_count_until`，而它把该类型全部流转历史拉进 Python 逐行归并
+    ——库存按年线性增长时这是看板最重的路径。这里把「每个资产最新一条流转」
+    下推到 SQL 窗口函数（(type, number) 分区，datetime/id 倒序取第一行，
+    与 Python 归并的「并列取后写入」语义一致），阈值与 Mac 规格过滤仍在
+    Python 侧复用同一套常量，保证两种实现口径完全一致。
+    MySQL < 8.0 无窗口函数时自动回退逐类型 Python 归并。
+    """
+    types = sorted(set(device_types))
+    if not types:
+        return {}
+
+    placeholders = ','.join(['%s'] * len(types))
+    rows = None
+    try:
+        cursor.execute(
+            "SELECT type, number, tag FROM ("
+            "  SELECT type, number, tag,"
+            "         ROW_NUMBER() OVER (PARTITION BY type, number"
+            "                           ORDER BY datetime DESC, id DESC) AS rn"
+            "  FROM inventory WHERE type IN (" + placeholders + ") AND datetime <= %s"
+            ") t WHERE rn = 1",
+            (*types, as_of)
+        )
+        rows = cursor.fetchall()
+    except Error:
+        # 旧版 MySQL（< 8.0，无窗口函数）：回退逐类型 Python 归并，口径不变
+        rows = []
+        for t in types:
+            cursor.execute(
+                "SELECT type, number, datetime, tag FROM inventory WHERE type=%s AND datetime <= %s",
+                (t, as_of)
+            )
+            latest = {}
+            for row in cursor.fetchall():
+                prev = latest.get(row['number'])
+                if prev is None or (row['datetime'] or date.min) >= (prev['datetime'] or date.min):
+                    latest[row['number']] = row
+            rows.extend(latest.values())
+
+    # 在库 + 新机阈值过滤（阈值规则按类型，复用 _in_stock_rows 同一常量表）
+    in_stock = {}
+    for row in rows:
+        if row['tag'] not in STOCK_TAGS:
+            continue
+        threshold = STOCK_TYPE_THRESHOLDS.get(row['type'])
+        if threshold and (row['number'] or '') < threshold:
+            continue
+        in_stock.setdefault(row['type'], []).append(row)
+
+    # Mac 拆分：一次查询取齐所有 Mac 拆分类型的规格映射（缺规格视为非 Mac）
+    mac_types = [t for t in types if t in MAC_SPLIT_TYPES]
+    specs = {}
+    if mac_types:
+        ph = ','.join(['%s'] * len(mac_types))
+        cursor.execute(
+            f"SELECT number, spec FROM device_list WHERE type IN ({ph})",
+            tuple(mac_types)
+        )
+        specs = {r['number']: (r['spec'] or '') for r in cursor.fetchall()}
+
+    counts = {}
+    for t in types:
+        if t in MAC_SPLIT_TYPES:
+            counts[(t, True)] = 0
+            counts[(t, False)] = 0
+        else:
+            counts[(t, None)] = 0
+    for t, bucket in in_stock.items():
+        if t in MAC_SPLIT_TYPES:
+            for r in bucket:
+                counts[(t, is_mac_spec(specs.get(r['number'])))] += 1
+        else:
+            counts[(t, None)] = len(bucket)
+    return counts
+
+
+def stock_detail_until(cursor, device_type, as_of, mac=None):
+    """在库资产明细（下钻用），口径与 :func:`stock_count_until` 完全一致。
+
+    每行带资产编码 / 规格 / 入库日期（最新一条入库类流转的日期）/ 保管部门 /
+    保管人（在库资产通常挂在库存托管人名下）。单据类型不含租赁台式主机，
+    SN 仅租赁机必填，故不返回。
+    """
+    rows = _in_stock_rows(cursor, device_type, as_of, mac)
+    if not rows:
+        return []
+    # 规格 / 保管人来自 device_list；同样避免 SQL JOIN（collation 不一致）
+    cursor.execute(
+        "SELECT number, spec, department, name FROM device_list WHERE type=%s",
+        (device_type,)
+    )
+    devices = {r['number']: r for r in cursor.fetchall()}
+    items = []
+    for r in rows:
+        dev = devices.get(r['number']) or {}
+        items.append({
+            'number': r['number'],
+            'spec': dev.get('spec') or '',
+            'department': dev.get('department') or '',
+            'owner': dev.get('name') or '',
+            'stock_date': date_str(r['datetime']),
+        })
+    items.sort(key=lambda item: item['number'])
+    return items
 
 
 def card_state(device, receive_date, inv_row):

@@ -1,11 +1,8 @@
--- zcsystem 本地开发数据库初始化脚本
--- 表结构由 app/ 下的 SQL 语句反推得到（仓库原本没有 schema 文件）
--- 各表排序规则与生产库实测一致，注意是"混合"的：
---   device_list -> utf8mb4_0900_ai_ci
---   identified / inventory / inventory_tmp -> utf8mb4_unicode_ci
--- 这正是 app/order.py 里跨表比较必须写 CONVERT(... USING utf8mb4) COLLATE ... 的原因，
--- 若统一成同一种排序规则，该问题会被掩盖，本地就复现不出生产行为了。
--- 用法: docker exec -i zcsystem-mysql mysql -uadmin -p"$DB_PASSWORD" db < scripts/init_db.sql
+-- zcsystem 数据库初始化脚本（建新库用；幂等，重复执行不报错）
+-- 全部表统一 charset=utf8mb4 / collate=utf8mb4_unicode_ci：
+-- 跨表 JOIN（如台账与流转表按 number 关联）要求排序规则一致。
+-- 老库若存在混杂排序规则，用 scripts/migrate_unify_collation.py 统一。
+-- 用法: mysql --default-character-set=utf8mb4 -u<user> -p <库名> < scripts/init_db.sql
 
 SET NAMES utf8mb4;
 
@@ -37,7 +34,7 @@ CREATE TABLE IF NOT EXISTS device_list (
   UNIQUE KEY uk_number (number),
   KEY idx_type (type),
   KEY idx_dept_name (department, name)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 资产主表：id 为自增主键（存量库用 scripts/migrate_inventory_autoincrement.py 迁移，
 -- 历史上由应用层 MAX(id)+1 分配，并发会撞主键，已废弃）

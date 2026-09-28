@@ -1,5 +1,6 @@
 import logging
 import os
+import threading
 
 import boto3
 from botocore.client import Config
@@ -16,7 +17,28 @@ DB_CONFIG = {
     'use_pure': True
 }
 
-_db_pool = pooling.MySQLConnectionPool(pool_name='zcsystem_pool', pool_size=5, **DB_CONFIG)
+# 连接池为每进程独立：容量需 ≥ 该进程的请求线程数（gunicorn WEB_THREADS），
+# 否则高峰期 get_connection 抛 PoolError → 全部请求 500「数据库连接失败」。
+# 默认 8 = WEB_THREADS(4) + 预留；可用 DB_POOL_SIZE 覆盖。
+#
+# 池惰性创建：mysql-connector 建池时会立即连满 pool_size 条连接，
+# 若在导入期建池，DB 不在则整个应用无法 import（CI/测试/冷启动全挂）。
+# 改为首次 get_db_connection() 时建池，启动不再依赖 DB 存活。
+_pool_lock = threading.Lock()
+_db_pool = None
+
+
+def _get_pool():
+    global _db_pool
+    if _db_pool is None:
+        with _pool_lock:
+            if _db_pool is None:
+                _db_pool = pooling.MySQLConnectionPool(
+                    pool_name='zcsystem_pool',
+                    pool_size=max(int(os.environ.get('DB_POOL_SIZE', '8')), 1),
+                    **DB_CONFIG,
+                )
+    return _db_pool
 
 RUSTFS_CONFIG = {
     'endpoint_url': os.environ['S3_ENDPOINT'],
@@ -28,7 +50,7 @@ RUSTFS_CONFIG = {
 
 def get_db_connection():
     try:
-        return _db_pool.get_connection()
+        return _get_pool().get_connection()
     except Error as e:
         logger.error("数据库连接错误: %s", e)
         return None

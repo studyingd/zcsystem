@@ -7,14 +7,16 @@ HTTP 样板（登录检查、连接管理、异常转 JSON）统一使用 :mod:`
 """
 
 import logging
-from datetime import date
+from datetime import date, datetime
 
-from flask import Blueprint, jsonify, render_template, request
+from flask import Blueprint, jsonify, render_template, request, send_file
 from mysql.connector import Error
 
 from . import ledger
 from .common import error_json, login_required_api, login_required_page, with_db
 from .config import S3_EXTERNAL_URL
+from .config import get_db_connection as _get_db_connection
+from .utils import rows_to_xlsx
 
 asset_bp = Blueprint('asset', __name__)
 logger = logging.getLogger(__name__)
@@ -337,6 +339,62 @@ def get_all_assets(conn, cursor):
         'months': _months(cursor),
         'filters': {'month': month, 'prefix': prefix, 'q': keyword},
     })
+
+
+# ---------- 导出（资产登记模块：台账资产） ----------
+@asset_bp.route('/asset_register/export')
+@login_required_page
+def export_asset_register():
+    """导出「资产登记」模块的台账资产（与页面「资产列表」同筛选、同口径，不分页）。
+
+    月份 / 编码前缀 / 关键字与列表一致；使用部门、使用人、资产状态按 inventory
+    最新流转覆盖（与列表、详情弹窗同一口径）。错误按纯文本返回（文件下载路由）。
+    """
+    sort_order = (request.args.get('order') or 'desc').lower()
+    if sort_order not in ('asc', 'desc'):
+        sort_order = 'desc'
+    conn = _get_db_connection()
+    if not conn:
+        return '数据库连接失败', 500
+    cursor = None
+    try:
+        cursor = conn.cursor(dictionary=True, buffered=True)
+        where_sql, params, _month, _prefix, _keyword = _list_filters(request.args)
+        cursor.execute(
+            f"SELECT {_DEVICE_COLUMNS} FROM device_list WHERE {where_sql} "
+            f"ORDER BY number {sort_order}, id {sort_order}",
+            tuple(params)
+        )
+        rows = _overlay_latest_inventory(cursor, list(cursor.fetchall()))
+        data = [{
+            '资产编码': r['number'],
+            '类型': r['type'],
+            '规格': r['spec'] or '',
+            'CPU': r['cpu'] or '',
+            '内存': r['mem'] or '',
+            '硬盘': r['disk'] or '',
+            '显卡': r['gpu'] or '',
+            'SN': r['sn'] or '',
+            '使用部门': r['department'] or '',
+            '使用人': r['name'] or '',
+            '资产状态': r.get('inv_status') or '',
+            '流转标签': r.get('inv_tag') or '',
+            '流转日期': r.get('inv_date') or '',
+        } for r in rows]
+        output = rows_to_xlsx([('资产台账', data)])
+        return send_file(
+            output,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=f"asset_register_export_{datetime.now().strftime('%Y%m%d%H%M')}.xlsx",
+        )
+    except Exception as exc:
+        logger.error('导出资产台账失败: %s', exc, exc_info=True)
+        return '导出失败: 服务器内部错误', 500
+    finally:
+        if cursor:
+            cursor.close()
+        conn.close()
 
 
 # ---------- 资产详情 ----------

@@ -5,16 +5,15 @@
 异常转 JSON）统一使用 :mod:`app.common`，本模块只写业务。
 """
 
-import io
 import logging
 import uuid
 
-import pandas as pd
 from flask import Blueprint, jsonify, request, send_file
 
 from .common import error_json, login_required_api, login_required_page, with_db
 from .config import S3_BUCKET, S3_EXTERNAL_URL, get_db_connection, get_s3_client
 from .ledger import INVENTORY_STATUSES
+from .utils import rows_to_xlsx
 
 inv_bp = Blueprint('inventory', __name__)
 logger = logging.getLogger(__name__)
@@ -229,13 +228,16 @@ def export_excel():
     if not conn:
         return "数据库连接失败", 500
 
+    cursor = None
     try:
-        query = f"SELECT id, number, department, site, type, datetime, status, tag, notice FROM inventory ORDER BY number {sort_order}"
-        df = pd.read_sql(query, conn)
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name='Inventory')
-        output.seek(0)
+        cursor = conn.cursor(dictionary=True)
+        # sort_order 已白名单校验（asc/desc），无注入面
+        cursor.execute(
+            "SELECT id, number, department, site, type, datetime, status, tag, notice "
+            f"FROM inventory ORDER BY number {sort_order.upper()}"
+        )
+        rows = cursor.fetchall()
+        output = rows_to_xlsx([('Inventory', rows)])
         filename = f'inventory_export_{sort_order}.xlsx'
         return send_file(
             output,
@@ -247,6 +249,8 @@ def export_excel():
         logger.error("导出Excel失败: %s", e)
         return "导出失败: 服务器内部错误", 500
     finally:
+        if cursor:
+            cursor.close()
         conn.close()
 
 
