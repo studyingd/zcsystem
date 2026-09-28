@@ -21,8 +21,8 @@ lint:
 test:
   stage: test
   script:
-    # 单元测试只依赖标准库 + pytest（不连数据库），无需装全量依赖
-    - pip install --quiet pytest
+    # 测试导入 app 包（需要 flask / mysql-connector / bcrypt / openpyxl 等），装全量依赖；不连数据库
+    - pip install --quiet -r requirements.txt pytest
     - pytest tests/ -v
 
 include:

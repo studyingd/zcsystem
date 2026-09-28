@@ -1,0 +1,53 @@
+# CI：后端 lint + 测试，前端 JS 语法检查。
+# 触发：push 到 main / 全部 Pull Request。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.14'
+
+      - name: 同步依赖
+        run: uv sync --frozen
+
+      - name: Ruff 检查
+        run: uv run ruff check app/ scripts/ tests/
+
+      - name: Pytest
+        run: uv run pytest -q
+        env:
+          # config.py 在导入期读取必填环境变量，CI 用假值即可（测试不真连 DB/S3）
+          DB_HOST: localhost
+          DB_USER: ci
+          DB_PASSWORD: ci
+          DB_NAME: ci
+          S3_ENDPOINT: http://localhost:9000
+          S3_ACCESS_KEY: ci
+          S3_SECRET_KEY: ci
+          SECRET_KEY: ci-secret
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: JS 语法检查
+        run: |
+          for f in $(find static/js -name '*.js'); do
+            node --check "$f"
+          done
