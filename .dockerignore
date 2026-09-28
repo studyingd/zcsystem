@@ -1,0 +1,26 @@
+# 注意：本文件必须放在「构建上下文根目录」（即仓库根），Docker 不读 docker/.dockerignore。
+# 构建上下文 = 仓库根（镜像需打包 app/ templates/ static/），用 -f docker/Dockerfile 指定 Dockerfile。
+# 构建上下文瘦身：镜像只需要 app/ templates/ static/ requirements.txt
+.git
+.gitignore
+.venv
+__pycache__
+**/__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+.codegraph
+.claude
+.env
+.env.*
+!.env.example
+docs
+tests
+scripts
+*.md
+*.log
+*.xlsx
+.DS_Store
+docker-compose*.yml
+Dockerfile
+.dockerignore

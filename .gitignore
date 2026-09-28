@@ -26,3 +26,7 @@ wheels/
 
 # Credentials
 user.txt
+
+# Test / lint caches
+.pytest_cache/
+.ruff_cache/
