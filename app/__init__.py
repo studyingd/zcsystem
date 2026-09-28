@@ -2,7 +2,7 @@ import logging
 import os
 
 from dotenv import load_dotenv
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, url_for
 from flask_wtf.csrf import CSRFError, CSRFProtect
 
 load_dotenv()
@@ -28,12 +28,29 @@ def create_app():
 
     csrf.init_app(app)
 
+    @app.template_global('static_url')
+    def static_url(filename):
+        """静态资源地址，自动附带基于文件 mtime+大小的版本号。
+
+        取代手写在模板里的 ？v=N：文件一改指纹即变，无需同步修改模板，
+        浏览器也不会拿到旧缓存。模板里用 {{ static_url('css/dashboard.css') }}。
+        """
+        path = os.path.join(app.static_folder, filename)
+        try:
+            st = os.stat(path)
+            ver = f'{int(st.st_mtime):x}-{st.st_size:x}'
+        except OSError:
+            ver = None
+        url = url_for('static', filename=filename)
+        return f'{url}?v={ver}' if ver else url
+
     @app.errorhandler(CSRFError)
     def handle_csrf_error(e):
         if request.path == '/login':
             return render_template('login.html', error='页面已过期，请重新输入账号密码'), 400
         return e.get_response()
 
+    from . import feishu
     from .asset import asset_bp
     from .auth import auth_bp
     from .dashboard import dashboard_bp
@@ -47,6 +64,11 @@ def create_app():
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(order_bp)
     app.register_blueprint(meta_bp)
+
+    # 启动预热飞书申请数据：后台线程拉取，请求线程不再等待飞书接口
+    # （网络不可达时只在日志留一条 warning，不影响启动；FEISHU_WARMUP=0 可关闭）
+    if os.environ.get('FEISHU_WARMUP', '1') != '0':
+        feishu.warm_up()
 
     @app.context_processor
     def inject_meta():

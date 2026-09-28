@@ -30,6 +30,9 @@ def frontend_meta():
         'departments': list(ledger.DEPARTMENTS),
         'card_statuses': list(ledger.CARD_STATUSES),
         'asset_types': list(ledger.ASSET_TYPES),
+        'order_device_types': list(ledger.ORDER_DEVICE_TYPES),
+        'config_types': list(ledger.CONFIG_TYPES),
+        'custom_type': ledger.CUSTOM_TYPE_OPTION,
     }
 
 
