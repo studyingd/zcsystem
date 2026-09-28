@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 
-{% block title %}资产管理系统 - 资产看板{% endblock %}
+{% block title %}资产管理系统 - 资产申请{% endblock %}
 
-{% block page_title %}资产看板{% endblock %}
+{% block page_title %}资产申请{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/dashboard.css?v=24">
+<link rel="stylesheet" href="{{ static_url('css/dashboard.css') }}">
 {% endblock %}
 
 {% block content %}
@@ -14,7 +14,6 @@
     <div class="dash-toolbar">
         <div class="dash-toolbar-head">
             <h2>资产申请单据</h2>
-            <p class="dash-toolbar-hint">点击单据编号可下推生成当月资产卡片；点击「今年已采购」可下钻各部门使用情况与使用人。「预算剩余 / 今年已采购 / 剩余库存」均为截至单据日期（含本单）的口径，预算执行总览见「预算设置」；「部门领用总览」查看各部门 × 各类型当前领用矩阵，并可下钻入职 / 领用 / 更换明细。</p>
         </div>
         <div class="dash-toolbar-actions">
             <button type="button" id="deptUsageBtn" class="dash-tool-btn">部门领用总览</button>
@@ -63,7 +62,6 @@
         </div>
         <div class="query-group">
             <button type="button" id="orderSearchBtn">查询</button>
-            <button type="button" id="orderResetBtn" class="btn-plain">重置</button>
         </div>
     </div>
 
@@ -77,27 +75,31 @@
                     <th>单据日期</th>
                     <th>设备类型</th>
                     <th>规格型号</th>
-                    <th class="num">申请数量</th>
+                    <th class="num">购买数量</th>
                     <th class="num">金额（元）</th>
                     <th>预算内外</th>
                     <th>预算剩余情况</th>
                     <th class="num">今年已采购</th>
-                    <th class="num">剩余库存</th>
+                    <th class="num" title="实时值：该设备类型当前在库资产数">剩余库存</th>
+                    <th class="num" title="实时值：飞书多维表中该类型当前未发放的申请数">申请数量</th>
                     <th>下推状态</th>
                     <th>审核状态</th>
                 </tr>
             </thead>
             <tbody id="orderTableBody">
-                <tr><td colspan="12" class="table-loading">加载中...</td></tr>
+                <tr><td colspan="13" class="table-loading">加载中...</td></tr>
             </tbody>
         </table>
     </div>
+
+    <!-- 单据列表分页控件：由 dashboard_orders.js 渲染，不足一页时隐藏 -->
+    <div id="orderPager" class="order-pager" hidden></div>
 </div>
 {% endblock %}
 
 {% block modals %}
 <!-- 单据详情 + 资产卡片 -->
-<div class="custom-modal" id="orderDetailModal" style="display:none;">
+<div class="custom-modal" role="dialog" aria-modal="true" id="orderDetailModal" style="display:none;">
     <div class="modal-content wide-modal-content">
         <div class="modal-header-bar">
             <span class="modal-header-title" id="orderDetailTitle">单据详情</span>
@@ -108,7 +110,7 @@
 </div>
 
 <!-- 部门领用总览：部门 × 类型矩阵 -> 入职/领用/更换明细 -->
-<div class="custom-modal" id="deptUsageModal" style="display:none;">
+<div class="custom-modal" role="dialog" aria-modal="true" id="deptUsageModal" style="display:none;">
     <div class="modal-content wide-modal-content">
         <div class="modal-header-bar">
             <span class="modal-header-title" id="deptUsageTitle">部门领用总览</span>
@@ -119,7 +121,7 @@
 </div>
 
 <!-- 资产档案详情：设备配置 + 流转历史（从部门领用总览的资产编码进入） -->
-<div class="custom-modal" id="assetFullModal" style="display:none;">
+<div class="custom-modal" role="dialog" aria-modal="true" id="assetFullModal" style="display:none;">
     <div class="modal-content wide-modal-content">
         <div class="modal-header-bar">
             <span class="modal-header-title" id="assetFullTitle">资产详情</span>
@@ -130,7 +132,7 @@
 </div>
 
 <!-- 今年已采购下钻：部门使用情况 -> 使用人明细 -->
-<div class="custom-modal" id="usageModal" style="display:none;">
+<div class="custom-modal" role="dialog" aria-modal="true" id="usageModal" style="display:none;">
     <div class="modal-content wide-modal-content">
         <div class="modal-header-bar">
             <span class="modal-header-title" id="usageTitle">部门使用情况</span>
@@ -140,8 +142,28 @@
     </div>
 </div>
 
+<div class="custom-modal" role="dialog" aria-modal="true" id="applyModal" style="display:none;">
+    <div class="modal-content wide-modal-content">
+        <div class="modal-header-bar">
+            <span class="modal-header-title" id="applyTitle">申请明细</span>
+            <button class="modal-close-btn" data-close="applyModal" aria-label="关闭">&times;</button>
+        </div>
+        <div id="applyBody" class="wide-modal-body"></div>
+    </div>
+</div>
+
+<div class="custom-modal" role="dialog" aria-modal="true" id="stockModal" style="display:none;">
+    <div class="modal-content wide-modal-content">
+        <div class="modal-header-bar">
+            <span class="modal-header-title" id="stockTitle">在库资产明细</span>
+            <button class="modal-close-btn" data-close="stockModal" aria-label="关闭">&times;</button>
+        </div>
+        <div id="stockBody" class="wide-modal-body"></div>
+    </div>
+</div>
+
 <!-- 单据新增/编辑 -->
-<div class="custom-modal" id="orderFormModal" style="display:none;">
+<div class="custom-modal" role="dialog" aria-modal="true" id="orderFormModal" style="display:none;">
     <div class="modal-content form-modal-content">
         <div class="modal-header-bar">
             <span class="modal-header-title" id="orderFormTitle">新增单据</span>
@@ -151,7 +173,7 @@
 </div>
 
 <!-- 资产卡片编辑 -->
-<div class="custom-modal" id="cardFormModal" style="display:none;">
+<div class="custom-modal" role="dialog" aria-modal="true" id="cardFormModal" style="display:none;">
     <div class="modal-content form-modal-content">
         <div class="modal-header-bar">
             <span class="modal-header-title" id="cardFormTitle">编辑资产卡片</span>
@@ -161,7 +183,7 @@
 </div>
 
 <!-- 预算设置 -->
-<div class="custom-modal" id="budgetModal" style="display:none;">
+<div class="custom-modal" role="dialog" aria-modal="true" id="budgetModal" style="display:none;">
     <div class="modal-content wide-modal-content">
         <div class="modal-header-bar">
             <span class="modal-header-title">年度预算设置</span>
@@ -176,5 +198,6 @@
 <script>
 var DASHBOARD_ADMIN = {{ admin | tojson }};
 </script>
-<script src="/static/js/dashboard_orders.js?v=23"></script>
+<script src="{{ static_url('js/dashboard_dept_usage.js') }}"></script>
+<script src="{{ static_url('js/dashboard_orders.js') }}"></script>
 {% endblock %}

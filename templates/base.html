@@ -8,17 +8,17 @@
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <!-- 全局样式：原 index.css 按职责拆分，加载顺序即原文件章节顺序（级联等价） -->
-    <link rel="stylesheet" href="/static/css/index/tokens.css?v=25">
-    <link rel="stylesheet" href="/static/css/index/base.css?v=25">
-    <link rel="stylesheet" href="/static/css/index/forms.css?v=25">
-    <link rel="stylesheet" href="/static/css/index/buttons.css?v=25">
-    <link rel="stylesheet" href="/static/css/index/modal.css?v=25">
-    <link rel="stylesheet" href="/static/css/index/responsive.css?v=25">
-    <link rel="stylesheet" href="/static/css/index/query.css?v=25">
-    <link rel="stylesheet" href="/static/css/index/detail.css?v=25">
-    <link rel="stylesheet" href="/static/css/index/shell.css?v=25">
-    <link rel="stylesheet" href="/static/css/index/components.css?v=25">
-    <link rel="stylesheet" href="/static/css/index/shared.css?v=25">
+    <link rel="stylesheet" href="{{ static_url('css/index/tokens.css') }}">
+    <link rel="stylesheet" href="{{ static_url('css/index/base.css') }}">
+    <link rel="stylesheet" href="{{ static_url('css/index/forms.css') }}">
+    <link rel="stylesheet" href="{{ static_url('css/index/buttons.css') }}">
+    <link rel="stylesheet" href="{{ static_url('css/index/modal.css') }}">
+    <link rel="stylesheet" href="{{ static_url('css/index/responsive.css') }}">
+    <link rel="stylesheet" href="{{ static_url('css/index/query.css') }}">
+    <link rel="stylesheet" href="{{ static_url('css/index/detail.css') }}">
+    <link rel="stylesheet" href="{{ static_url('css/index/shell.css') }}">
+    <link rel="stylesheet" href="{{ static_url('css/index/components.css') }}">
+    <link rel="stylesheet" href="{{ static_url('css/index/shared.css') }}">
     {% block extra_css %}{% endblock %}
 </head>
 
@@ -51,14 +51,14 @@
 
             <nav class="sidebar-nav">
                 <span class="sidebar-section">工作台</span>
-                <a href="/dashboard" class="nav-link {% if active_nav == 'dashboard' %}active{% endif %}" title="资产看板" {% if active_nav == 'dashboard' %}aria-current="page"{% endif %}>
+                <a href="/dashboard" class="nav-link {% if active_nav == 'dashboard' %}active{% endif %}" title="资产申请" {% if active_nav == 'dashboard' %}aria-current="page"{% endif %}>
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <rect x="3" y="3" width="7" height="9" rx="1"></rect>
                         <rect x="14" y="3" width="7" height="5" rx="1"></rect>
                         <rect x="14" y="12" width="7" height="9" rx="1"></rect>
                         <rect x="3" y="16" width="7" height="5" rx="1"></rect>
                     </svg>
-                    <span>资产看板</span>
+                    <span>资产申请</span>
                 </a>
                 {% if logged_in %}
                 <a href="/asset_register" class="nav-link {% if active_nav == 'asset_register' %}active{% endif %}" title="资产登记" {% if active_nav == 'asset_register' %}aria-current="page"{% endif %}>
@@ -130,7 +130,15 @@
                 <h1 class="topbar-title">{% block page_title %}资产管理系统{% endblock %}</h1>
                 <div class="topbar-actions">
                     {% if logged_in %}
-                    <a href="/export?order=desc" class="topbar-action-btn" title="导出数据" aria-label="导出 Excel 数据">
+                    {# 导出目标随当前模块变化：资产申请=单据 / 资产登记=台账资产 / 资产变更=流转记录 #}
+                    {% set export_map = {
+                        'dashboard': ('/orders/export', '导出单据 Excel'),
+                        'asset_register': ('/asset_register/export', '导出资产台账 Excel'),
+                        'asset_change': ('/export?order=desc', '导出变更记录 Excel')
+                    } %}
+                    {% set export_target = export_map.get(active_nav|default(''), ('/export?order=desc', '导出变更记录 Excel')) %}
+                    <a href="{{ export_target[0] }}" id="topbarExport" class="topbar-action-btn"
+                       title="{{ export_target[1] }}" aria-label="{{ export_target[1] }}">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                             <polyline points="7 10 12 15 17 10"></polyline>
@@ -151,8 +159,8 @@
     {% block modals %}{% endblock %}
 
     <script type="application/json" id="zcMeta">{{ zc_meta | tojson }}</script>
-    <script src="/static/js/utils.js?v=3"></script>
-    <script src="/static/js/modal.js?v=2"></script>
+    <script src="{{ static_url('js/utils.js') }}"></script>
+    <script src="{{ static_url('js/modal.js') }}"></script>
     <script>
     // 全局 fetch 封装：POST/PUT/DELETE 请求自动携带 CSRF token，统一处理 session 过期
     const _originalFetch = window.fetch;

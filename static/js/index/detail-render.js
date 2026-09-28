@@ -34,8 +34,8 @@ function detailTogglesHtml(editable) {
 
 function detailEditHtml() {
     const { basic, hardware, history } = DETAIL_DATA;
-    const isRented = (basic.type || '') === '租聘台式主机';
-    const isComputer = ['笔记本电脑', '台式主机', '租聘台式主机'].includes((hardware && hardware.type) || basic.type || '');
+    const isRented = (basic.type || '') === '租赁台式主机';
+    const isComputer = ['笔记本电脑', '台式主机', '租赁台式主机'].includes((hardware && hardware.type) || basic.type || '');
 
             // 区块1：资产详情
             let html = `<div class="detail-form" data-id="${escapeHtml(basic.id)}" data-number="${escapeHtml(basic.number)}" data-source="${escapeHtml(basic.source)}">`;
@@ -52,11 +52,11 @@ function detailEditHtml() {
                         <span class="detail-value">
                             <select class="edit-input" name="type" disabled>
                                 <option value="台式主机" ${basic.type === '台式主机' ? 'selected' : ''}>台式主机</option>
-                                <option value="租聘台式主机" ${basic.type === '租聘台式主机' ? 'selected' : ''}>租聘台式主机</option>
+                                <option value="租赁台式主机" ${basic.type === '租赁台式主机' ? 'selected' : ''}>租赁台式主机</option>
                                 <option value="笔记本电脑" ${basic.type === '笔记本电脑' ? 'selected' : ''}>笔记本电脑</option>
                                 <option value="显示器" ${basic.type === '显示器' ? 'selected' : ''}>显示器</option>
                                 <option value="其它" ${basic.type === '其它' ? 'selected' : ''}>其它</option>
-                                ${basic.type && !['台式主机', '租聘台式主机', '笔记本电脑', '显示器', '其它'].includes(basic.type) ? `<option value="${escapeHtml(basic.type)}" selected>${escapeHtml(basic.type)}</option>` : ''}
+                                ${basic.type && !['台式主机', '租赁台式主机', '笔记本电脑', '显示器', '其它'].includes(basic.type) ? `<option value="${escapeHtml(basic.type)}" selected>${escapeHtml(basic.type)}</option>` : ''}
                             </select>
                         </span>
                     </div>
@@ -176,8 +176,8 @@ function detailViewHtml() {
                     </div>`;
 
     const assetType = hw.type || basic.type || '';
-    const isComputer = ['笔记本电脑', '台式主机', '租聘台式主机'].includes(assetType);
-    const isRented = (basic.type || '') === '租聘台式主机';
+    const isComputer = ['笔记本电脑', '台式主机', '租赁台式主机'].includes(assetType);
+    const isRented = (basic.type || '') === '租赁台式主机';
     // 显示器等非电脑类型没有硬件字段，整块隐藏
     let cfgHtml = '';
     if (isComputer) {

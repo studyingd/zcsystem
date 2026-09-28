@@ -29,15 +29,15 @@ function metaList(key, fallback) {
 }
 
 // 资产状态（兜底同 ledger.INVENTORY_STATUSES）
-const STATUS_OPTIONS = metaList('statuses', ['已录入', '未录入', '租聘', '借用', '入库', '无需录入', '报废']);
+const STATUS_OPTIONS = metaList('statuses', ['已录入', '未录入', '租赁', '借用', '入库', '无需录入', '报废']);
 
-// 流转标签：领用类（入职/领用/更换）+ 在库类（离职/入库）+ 弃用（兜底同 ledger.ALL_TAGS）
-const TAG_OPTIONS = metaList('tags', ['入职', '领用', '更换', '离职', '入库', '弃用']);
+// 流转标签：领用类（入职/领用/更换）+ 在库类（入库）+ 弃用（兜底同 ledger.ALL_TAGS）
+const TAG_OPTIONS = metaList('tags', ['入职', '领用', '更换', '入库', '弃用']);
 
 // 资产状态徽章样式（index.css 的 .status-done / .status-pending / .status-none）
 function getStatusClass(status) {
     if (status === '已录入') return 'status-done';
-    if (['未录入', '租聘', '借用', '入库'].includes(status)) return 'status-pending';
+    if (['未录入', '租赁', '借用', '入库'].includes(status)) return 'status-pending';
     return 'status-none';
 }
 
@@ -50,7 +50,7 @@ function statusBadgeHtml(status) {
 // 流转标签徽章：与 ledger 的 METRIC_TAGS / STOCK_TAGS 分组同口径
 // （领用类绿 = 在用、在库类黄 = 库存、弃用灰）
 const TAG_METRIC = ['入职', '领用', '更换'];
-const TAG_STOCK = ['入库', '离职'];
+const TAG_STOCK = ['入库'];
 
 function getTagClass(tag) {
     if (TAG_METRIC.includes(tag)) return 'status-done';
@@ -67,6 +67,12 @@ function tagBadgeHtml(tag) {
 const DEPARTMENT_VALUES = metaList('departments', [
     'FIN', 'HR', 'SCM', 'STU', 'GMO', 'COM', 'CSG', 'PMD', 'IT', 'SMG', '证券事务部'
 ]);
+
+// 单据新增页可选设备类型 + 自定义类型占位（兜底同 ledger.ORDER_DEVICE_TYPES / CUSTOM_TYPE_OPTION）
+const ORDER_DEVICE_TYPES = metaList('order_device_types', ['显示器', '笔记本电脑', '台式主机']);
+const CUSTOM_TYPE = (ZC_META && ZC_META.custom_type) || '其它';
+// 必须填写硬件配置（CPU / 内存 / 硬盘 / 显卡）的设备类型（兜底同 ledger.CONFIG_TYPES）
+const CONFIG_TYPES = metaList('config_types', ['笔记本电脑', '台式主机', '租赁台式主机']);
 
 const DEPARTMENTS = [
     {value: '', text: '--请选择部门--'},

@@ -1,5 +1,5 @@
 /* ==========================================================
-   资产看板 - 单据视图
+   资产申请 - 单据视图
    ========================================================== */
 
 /* --- 页头工具条 --- */
@@ -21,12 +21,6 @@
     font-size: 16px;
     font-weight: 600;
     color: var(--color-heading);
-}
-
-.dash-toolbar-hint {
-    margin: 4px 0 0;
-    font-size: 12.5px;
-    color: var(--color-muted-soft);
 }
 
 .dash-toolbar-actions {
@@ -126,6 +120,35 @@
     color: var(--color-text);
 }
 
+/* --- 单据列表分页控件（每页最多 10 条，由 JS 渲染） --- */
+.order-pager {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    margin: 12px 0 4px;
+}
+
+.order-pager[hidden] {
+    display: none;
+}
+
+.order-pager-info {
+    font-size: 12.5px;
+    color: var(--color-muted);
+}
+
+.order-pager-btns {
+    display: flex;
+    gap: 8px;
+}
+
+.order-pager-btns .mini-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
 /* --- 汇总条 --- */
 .order-summary {
     display: grid;
@@ -155,15 +178,22 @@
     color: var(--color-heading);
 }
 
-/* --- 表格 --- */
+/* --- 表格（本页统一重做：单据表 / 资产卡片表 / 各下钻明细表 / 预算表） ---
+   设计口径：
+   · 取消 index/buttons.css 为「资产变更表」写的全网格边框与第 4/5/7/8 列定宽，
+     本页表格只保留行分隔线，去掉竖线后观感更轻；
+   · 对齐规则：文本列一律左对齐（表头与数据同侧），规格型号超长省略 + title；
+     仅 .num 数量 / 金额列右对齐并启用等宽数字；
+   · 表头粘性沿用（弹窗内表格自身滚动时钉住），斑马纹取消、悬停高亮补回。 */
 .order-table-wrap,
 .card-table-wrap {
     overflow-x: auto;
     margin-top: 8px;
 }
 
-/* index.css 里 .data-table 对第 4/5/7/8 列写死了宽度（为资产变更表设计），
-   单据视图列结构不同，这里统一取消列宽限制 */
+/* 先清掉 index/buttons.css 的全边框 / 居中 / 列宽，再按本页口径重建。
+   white-space 必须 !important：buttons.css 对第 4 列写了 normal !important，
+   会令保管人 / 规格型号等窄列折行；word-break 同理清掉 break-all */
 .data-table.order-table th,
 .data-table.order-table td,
 .data-table.card-table th,
@@ -173,27 +203,49 @@
     width: auto !important;
     min-width: 0 !important;
     max-width: none !important;
+    border: none;
+    text-align: left;
     white-space: nowrap !important;
-    padding: 10px 12px;
+    word-break: normal;
+    padding: 10px 14px;
     font-size: 13px;
+    vertical-align: middle;
 }
 
+/* 数据行：只保留行分隔线 */
+.data-table.order-table td,
+.data-table.card-table td,
+.data-table.usage-table td {
+    border-bottom: 1px solid var(--color-border-light);
+}
+
+/* 表头：粘性由 index/buttons.css 提供，这里补足底色 / 分隔线 / 弱化字色 */
+.data-table.order-table thead th,
+.data-table.card-table thead th,
+.data-table.usage-table thead th {
+    background: #fff;
+    color: var(--color-muted);
+    font-weight: 600;
+    border-bottom: 1px solid var(--color-border);
+}
+
+/* 数量 / 金额等数值列：右对齐 + 等宽数字，表头同步右对齐（表头数据同侧） */
+.data-table.order-table th.num,
 .data-table.order-table td.num,
+.data-table.card-table th.num,
 .data-table.card-table td.num,
+.data-table.usage-table th.num,
 .data-table.usage-table td.num {
     text-align: right;
     font-variant-numeric: tabular-nums;
 }
 
-.data-table th.num {
-    text-align: right;
-}
-
+/* 规格型号列：左对齐 + 超长省略（悬停 title 看全称）；
+   固定布局表格（stock-table）中列宽由列定义接管，max-width 不参与计算 */
 .data-table .spec-cell {
-    max-width: 220px !important;
+    max-width: 260px !important;
     overflow: hidden;
     text-overflow: ellipsis;
-    text-align: left;
 }
 
 .data-table td.amount {
@@ -209,15 +261,36 @@
     padding: 36px 12px !important;
 }
 
+/* 表格内的空态 / 加载 / 错误整行：需盖过上方按列左对齐的单元格重置（同权重靠源顺序取胜） */
+.data-table td.table-loading,
+.data-table td.table-empty,
+.data-table td.table-error {
+    text-align: center;
+}
+
 .table-error {
     color: var(--color-danger);
 }
 
+/* 行内操作按钮组：跟随左对齐口径 */
 .row-actions {
     display: flex;
     gap: 6px;
-    justify-content: center;
+    justify-content: flex-start;
     align-items: center;
+}
+
+/* 斑马纹取消、悬停高亮（集中在本节，不再散落文件后段） */
+.data-table.order-table tbody tr:nth-child(even),
+.data-table.card-table tbody tr:nth-child(even),
+.data-table.usage-table tbody tr:nth-child(even) {
+    background: none;
+}
+
+.data-table.order-table tbody tr:hover,
+.data-table.card-table tbody tr:hover,
+.data-table.usage-table tbody tr:hover {
+    background: #f8fafc;
 }
 
 /* --- 链接式按钮 / 小按钮 --- */
@@ -359,12 +432,61 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    /* flex 子元素 min-height:auto 会按内容撑起高度，导致 max-height 失效、表格区被裁出视口 */
+    min-height: 0;
 }
 
 .wide-modal-body {
     overflow-y: auto;
     flex: 1;
+    min-height: 0;  /* 允许 body 收缩并在内部滚动，避免内容顶出弹窗 */
     padding-right: 4px;
+    /* 库存明细 / 申请明细：表头粘性需表格区自己滚动，body 作为纵向 flex 容器让 wrap 收缩 */
+    display: flex;
+    flex-direction: column;
+}
+
+/* 弹窗内的表格滚动区：占满剩余空间并自身滚动，避免 body 与 wrap 双滚动条 */
+.wide-modal-body .card-table-wrap {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    /* 滚动条移到 wrap 后，预留右侧空间避免滚动条贴住表格（尤其末列右对齐的日期/金额） */
+    padding-right: 8px;
+}
+
+/* 资产详情从其他弹窗（在库明细/领用总览）下钻打开时，抬高一层避免被压在下面 */
+#assetFullModal { z-index: 10000; }
+
+/* 在库资产明细：固定表格布局，定宽列按内容实际宽度取值
+   （编码按钮 76px、日期 10 字符 ≈77px，均实测），规格型号作为唯一弹性列
+   吸收剩余宽度；整表最小宽 560px，更窄容器由 .card-table-wrap 横向滚动兜底。
+   对齐跟随本页统一口径：文本列左对齐，入库日期也左对齐（与表头同侧） */
+.data-table.usage-table.stock-table {
+    table-layout: fixed;
+    width: 100%;
+    min-width: 560px;
+}
+.data-table.usage-table.stock-table th:nth-child(1),
+.data-table.usage-table.stock-table td:nth-child(1) { width: 110px !important; }
+.data-table.usage-table.stock-table th:nth-child(3),
+.data-table.usage-table.stock-table td:nth-child(3) { width: 84px !important; }
+.data-table.usage-table.stock-table th:nth-child(4),
+.data-table.usage-table.stock-table td:nth-child(4) { width: 72px !important; }
+/* 入库日期列按内容收窄（原来桌面端约 189px 虚胖），右内边距与其它列一致；
+   滚动条间隙由 .card-table-wrap 的 padding-right 预留，无需额外加宽 */
+.data-table.usage-table.stock-table th:nth-child(5),
+.data-table.usage-table.stock-table td:nth-child(5) { width: 112px !important; }
+.data-table.usage-table.stock-table td:last-child,
+.data-table.usage-table.stock-table th:last-child {
+    padding-right: 12px !important;
+}
+/* 固定布局下各列允许溢出省略，长规格型号不会顶破列宽 */
+.data-table.usage-table.stock-table th,
+.data-table.usage-table.stock-table td {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .wide-modal-body::-webkit-scrollbar,
@@ -476,29 +598,6 @@
     color: var(--color-heading);
 }
 
-.owner-summary {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-bottom: 12px;
-}
-
-.owner-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 12px;
-    background: #eef1f5;
-    border-radius: 14px;
-    font-size: 12px;
-    color: #495057;
-}
-
-.owner-chip b {
-    color: var(--color-primary);
-    font-size: 13px;
-}
-
 /* --- 表单弹窗 --- */
 .form-row {
     display: flex;
@@ -599,6 +698,115 @@
     border-radius: var(--radius-sm);
 }
 
+/* 预算金额输入去掉浏览器自带的增减步进按钮 */
+.budget-input::-webkit-outer-spin-button,
+.budget-input::-webkit-inner-spin-button,
+#newBudgetAmount::-webkit-outer-spin-button,
+#newBudgetAmount::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.budget-input,
+#newBudgetAmount {
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+
+/* 单据表单的设备数量 / 单价 / 金额去掉浏览器自带的增减步进按钮 */
+#orderFormBody input[type='number']::-webkit-outer-spin-button,
+#orderFormBody input[type='number']::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+#orderFormBody input[type='number'] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+
+/* 申请明细弹窗：固定表格布局 + 列宽占比，保证表头与数据严格对齐；
+   申请理由列允许换行，长理由完整展示（需高于 .data-table.usage-table td 的 nowrap 优先级） */
+.data-table.usage-table.apply-table {
+    table-layout: fixed;
+    /* 窄屏保底宽度：不足时由 .card-table-wrap 横向滚动，避免列被压得不可读 */
+    min-width: 620px;
+}
+
+.data-table.usage-table.apply-table th:nth-child(1),
+.data-table.usage-table.apply-table td:nth-child(1) {
+    width: 15% !important;
+}
+
+.data-table.usage-table.apply-table th:nth-child(2),
+.data-table.usage-table.apply-table td:nth-child(2) {
+    width: 20% !important;
+}
+
+.data-table.usage-table.apply-table th:nth-child(3),
+.data-table.usage-table.apply-table td:nth-child(3) {
+    width: 16% !important;
+}
+
+.data-table.usage-table.apply-table th:nth-child(4),
+.data-table.usage-table.apply-table td:nth-child(4) {
+    width: 49% !important;
+}
+
+.data-table.usage-table td.apply-reason-cell {
+    white-space: normal !important;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    text-align: left;
+    line-height: 1.6;
+}
+
+/* 申请明细骨架屏：网格列宽与真实表格一致，避免加载完成时布局跳动 */
+.apply-skeleton {
+    padding: 2px 0 8px;
+}
+
+.apply-skeleton-row {
+    display: grid;
+    grid-template-columns: 15% 20% 16% 49%;
+    gap: 12px;
+    align-items: center;
+    padding: 12px;
+    border-bottom: 1px solid var(--color-border-light);
+}
+
+.apply-skeleton-head {
+    padding: 14px 12px;
+    background: var(--color-bg);
+    border-radius: var(--radius-sm);
+}
+
+.apply-skeleton-bar {
+    height: 12px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #eef1f4 25%, #e2e8f0 37%, #eef1f4 63%);
+    background-size: 400% 100%;
+    animation: applySkeleton 1.4s ease infinite;
+}
+
+@keyframes applySkeleton {
+    0% { background-position: 100% 0; }
+    100% { background-position: 0 0; }
+}
+
+/* 错误态重试入口 */
+.modal-error-actions {
+    margin-top: 14px;
+}
+
+/* 编辑态已用输入框下方的构成提示（自动 + 修正） */
+.budget-used-hint {
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--color-muted);
+    white-space: nowrap;
+}
+
 .budget-add-row {
     display: flex;
     align-items: center;
@@ -609,7 +817,6 @@
     border-top: 1px solid var(--color-border-light);
 }
 
-.budget-add-row select,
 .budget-add-row input {
     flex: none;
     width: 190px;

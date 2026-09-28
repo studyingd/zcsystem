@@ -323,7 +323,7 @@
 /* 选中状态按语义着色，与看板统计卡配色保持一致 */
 .status-toggle[data-status="已录入"].active { background: #f0fdf4; color: #15803d; border-color: #86efac; }
 .status-toggle[data-status="未录入"].active { background: #fffbeb; color: #b45309; border-color: #fcd34d; }
-.status-toggle[data-status="租聘"].active { background: #ecfeff; color: #0e7490; border-color: #67e8f9; }
+.status-toggle[data-status="租赁"].active { background: #ecfeff; color: #0e7490; border-color: #67e8f9; }
 .status-toggle[data-status="借用"].active { background: #f5f3ff; color: #6d28d9; border-color: #c4b5fd; }
 .status-toggle[data-status="入库"].active { background: #fff7ed; color: #c2410c; border-color: #fdba74; }
 .status-toggle[data-status="无需录入"].active { background: #f1f5f9; color: #475569; border-color: #cbd5e1; }

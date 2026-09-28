@@ -19,6 +19,8 @@ const FOCUSABLE_SELECTOR = [
 
 // 已注册的弹窗 -> { onClose, lastFocused, keyHandler }
 const _modalRegistry = new WeakMap();
+// 当前打开的弹窗（支持嵌套：全部关闭后才解除 body 滚动锁）
+const _openModals = new Set();
 
 function _focusableIn(modal) {
     return Array.from(modal.querySelectorAll(FOCUSABLE_SELECTOR))
@@ -99,6 +101,7 @@ function openModal(modal) {
 
     const items = _focusableIn(modal);
     (items[0] || modal).focus();
+    _openModals.add(modal);
     document.body.classList.add('modal-lock');
 }
 
@@ -110,7 +113,8 @@ function closeModal(modal) {
     modal.style.display = 'none';
     modal.classList.remove('modal-open');
     modal.setAttribute('aria-hidden', 'true');
-    document.body.classList.remove('modal-lock');
+    _openModals.delete(modal);
+    if (!_openModals.size) document.body.classList.remove('modal-lock');
 
     if (state && state.lastFocused && document.contains(state.lastFocused)) {
         state.lastFocused.focus();
@@ -118,9 +122,10 @@ function closeModal(modal) {
     if (state && typeof state.onClose === 'function') state.onClose();
 }
 
-/** 绑定页面内所有弹窗（data-modal 或已知 class），返回元素列表。 */
-function initModals(root = document) {
+/** 绑定页面内所有弹窗（data-modal 或已知 class），返回元素列表。
+ *  options 透传给 initModal，例如 { closeOnBackdrop: false }。 */
+function initModals(root = document, options = {}) {
     const modals = Array.from(root.querySelectorAll('.modal-overlay, .custom-modal, [data-modal]'));
-    modals.forEach(modal => initModal(modal));
+    modals.forEach(modal => initModal(modal, options));
     return modals;
 }

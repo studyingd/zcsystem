@@ -133,7 +133,7 @@ function bindQueryBtn() {
         const typeOptions = [
             {value: '', text: '--请选择类型--'},
             {value: '台式主机', text: '台式主机'},
-            {value: '租聘台式主机', text: '租聘台式主机'},
+            {value: '租赁台式主机', text: '租赁台式主机'},
             {value: '笔记本电脑', text: '笔记本电脑'},
             {value: '显示器', text: '显示器'},
             {value: '其它', text: '其它'}
@@ -143,7 +143,7 @@ function bindQueryBtn() {
             {value: '', text: '--请选择状态--'},
             {value: '已录入', text: '已录入'},
             {value: '未录入', text: '未录入'},
-            {value: '租聘', text: '租聘'},
+            {value: '租赁', text: '租赁'},
             {value: '借用', text: '借用'},
             {value: '入库', text: '入库'},
             {value: '无需录入', text: '无需录入'}
@@ -165,7 +165,7 @@ function bindQueryBtn() {
                 ).join('')}
             </div>`;
 
-        const tagOptions = ['入职', '领用', '更换', '离职', '入库'];
+        const tagOptions = ['入职', '领用', '更换', '入库'];
         let tagToggleHTML = `
             <input type="hidden" id="prefill_tag" name="tag" value="">
             <div class="status-toggles" style="margin-top:0;">

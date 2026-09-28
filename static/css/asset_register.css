@@ -414,10 +414,13 @@ button:disabled {
     color: var(--color-muted);
     font-size: 13px;
     cursor: pointer;
-    transition: border-color 0.15s ease, color 0.15s ease;
+    transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease;
 }
 
 .page-btn:hover:not(:disabled):not(.active) {
+    /* 必须显式给背景：全局 button:hover 的深蓝底优先级高于 .page-btn，
+       只改文字色会变成"深蓝字压深蓝底"（页码看不见） */
+    background: var(--color-bg);
     border-color: var(--color-primary);
     color: var(--color-primary);
 }
@@ -434,6 +437,12 @@ button:disabled {
     background: var(--color-primary);
     border-color: var(--color-primary);
     color: #fff;
+}
+
+/* 当前页悬浮：给一点反馈，同时避开全局 button:hover */
+.page-btn.active:hover {
+    background: var(--color-primary-hover);
+    border-color: var(--color-primary-hover);
 }
 
 .page-info {

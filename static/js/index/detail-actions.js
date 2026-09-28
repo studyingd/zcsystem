@@ -45,7 +45,7 @@ function submitViewUpdate(overrides) {
     body.set('site', b.site || '');
     body.set('type', b.type || '');
     body.set('datetime', b.datetime || new Date().toISOString().split('T')[0]);
-    body.set('status', b.status || (b.type === '租聘台式主机' ? '租聘' : '未录入'));
+    body.set('status', b.status || (b.type === '租赁台式主机' ? '租赁' : '未录入'));
     body.set('tag', b.tag || '');
     body.set('notice', b.notice || '');
     body.set('attachment_urls', b.attachment_urls || '');
@@ -174,7 +174,13 @@ function bindDetailActions() {
         i.disabled = false;
     });
     const assetType = form.querySelector('[name="type"]').value;
-    const keepStatus = assetType === '租聘台式主机' ? '租聘' : '未录入';
+    // 状态默认值：报废/无需录入是明确的人工标记，进编辑态保留不重置；
+    // 租赁机状态由类型派生（始终回填「租赁」，除非已是报废/无需录入）；
+    // 其余情况变更换手后待重新录入，默认回「未录入」
+    const origStatus = (form.querySelector('input[name="status"]').value || '').trim();
+    const keepStatus = ['无需录入', '报废'].includes(origStatus)
+        ? origStatus
+        : (assetType === '租赁台式主机' ? '租赁' : '未录入');
     statusInput.value = keepStatus;
     form.querySelectorAll('.status-toggle[data-status]').forEach(t => {
         t.classList.toggle('active', t.dataset.status === keepStatus);

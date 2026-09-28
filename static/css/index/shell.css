@@ -75,6 +75,7 @@
 .sidebar-nav {
     flex: 1;
     overflow-y: auto;
+    overflow-x: hidden;
     padding: 14px 12px;
     display: flex;
     flex-direction: column;
@@ -341,10 +342,54 @@
 
     .app-sidebar {
         transition: width 0.22s ease;
+        /* 收起过程中文字尚未淡出时先被侧栏边缘裁掉，避免溢出到主区域 */
+        overflow: hidden;
     }
 
     .app-main {
         transition: margin-left 0.22s ease;
+    }
+
+    /* 收起态图标居中：不切换 justify-content / gap（会瞬移），
+       只过渡导航内边距让图标平移到图标栏中心 */
+    .sidebar-nav {
+        transition: padding 0.22s ease;
+    }
+
+    .sidebar-footer,
+    .sidebar-user {
+        transition: padding 0.22s ease, gap 0.22s ease;
+    }
+
+    /* 文字统一淡出 / 淡入：
+       - 收起：先快速淡出（0.1s），visibility 延迟到淡出结束再隐藏
+       - 展开：等侧栏宽度基本展开（延迟 0.1s）后再淡入，
+         避免文字在窄栏里被挤压 / 换行 */
+    .sidebar-title,
+    .sidebar-section,
+    .sidebar-username,
+    .sidebar-version,
+    .nav-link > span {
+        white-space: nowrap;
+        opacity: 1;
+        visibility: visible;
+        transition: opacity 0.14s ease 0.1s, visibility 0s linear 0.1s;
+    }
+
+    /* 独占整行的文字标签（分组标题 / 版本号）：收起时高度一并收掉，
+       否则淡出后仍留一块空白 */
+    .sidebar-section,
+    .sidebar-version {
+        max-height: 40px;
+        overflow: hidden;
+        transition: max-height 0.18s ease, padding 0.18s ease,
+                    opacity 0.14s ease 0.1s, visibility 0s linear 0.1s;
+    }
+
+    /* 用户名与退出按钮同处一行：收起时只把宽度收到 0，避免整块布局上下重排 */
+    .sidebar-username {
+        max-width: 200px;
+        transition: max-width 0.2s ease, opacity 0.14s ease 0.1s, visibility 0s linear 0.1s;
     }
 
     body.sidebar-collapsed .app-sidebar {
@@ -359,43 +404,43 @@
         transform: rotate(180deg);
     }
 
-    body.sidebar-collapsed .sidebar-brand {
-        justify-content: center;
-        gap: 0;
-        padding: 0;
-    }
-
     body.sidebar-collapsed .sidebar-title,
     body.sidebar-collapsed .sidebar-section,
     body.sidebar-collapsed .sidebar-username,
     body.sidebar-collapsed .sidebar-version,
     body.sidebar-collapsed .nav-link > span {
-        display: none;
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+        transition: opacity 0.1s ease, visibility 0s linear 0.1s;
+    }
+
+    body.sidebar-collapsed .sidebar-section,
+    body.sidebar-collapsed .sidebar-version {
+        max-height: 0;
+        padding-top: 0;
+        padding-bottom: 0;
+        transition: max-height 0.18s ease, padding 0.18s ease,
+                    opacity 0.1s ease, visibility 0s linear 0.1s;
+    }
+
+    body.sidebar-collapsed .sidebar-username {
+        max-width: 0;
+        transition: max-width 0.2s ease, opacity 0.1s ease, visibility 0s linear 0.1s;
     }
 
     body.sidebar-collapsed .sidebar-nav {
-        padding: 14px 10px;
-    }
-
-    body.sidebar-collapsed .nav-link {
-        justify-content: center;
-        gap: 0;
-        padding: 10px 0;
+        padding: 14px 15px;
     }
 
     body.sidebar-collapsed .sidebar-footer {
-        padding: 12px 10px;
+        padding: 12px 4px;
     }
 
+    /* 收起态：用户名宽度收到 0 后，头像与退出按钮在同一行里自然排布，不上下重排 */
     body.sidebar-collapsed .sidebar-user {
-        flex-direction: column;
-        justify-content: center;
-        gap: 6px;
+        gap: 2px;
         padding: 6px 0;
-    }
-
-    body.sidebar-collapsed .sidebar-logout-form {
-        margin-left: 0;
     }
 }
 

@@ -173,8 +173,8 @@ function applyTypeUi() {
     el.customType.required = isCustom;
     if (!isCustom) el.customType.value = '';
 
-    // SN 仅租聘机必填（逐台一个）；其余类型整组隐藏并清空，
-    // 避免上次选了租聘机留下的 SN 被静默带到下一批
+    // SN 仅租赁机必填（逐台一个）；其余类型整组隐藏并清空，
+    // 避免上次选了租赁机留下的 SN 被静默带到下一批
     const snGroup = document.querySelector('.form-group[data-field="sn"]');
     if (snGroup) snGroup.hidden = !isRental;
     el.assetSN.required = isRental;
@@ -189,7 +189,7 @@ function applyTypeUi() {
         [el.configCPU, el.configMem, el.configDisk, el.configGPU].forEach(input => { input.value = ''; });
     }
 
-    // 租聘机规格默认值：只在用户还没填时回填，不覆盖已有输入
+    // 租赁机规格默认值：只在用户还没填时回填，不覆盖已有输入
     if (isRental && !el.assetSpec.value.trim()) {
         el.assetSpec.value = REGISTER_CONFIG.rental_default_spec;
     }
@@ -455,8 +455,21 @@ function setListState(html) {
     el.listPagination.hidden = true;
 }
 
+// 顶栏导出跟随当前筛选条件（月份 / 编码前缀 / 关键字）
+function syncExportLink() {
+    const link = document.getElementById('topbarExport');
+    if (!link) return;
+    const params = new URLSearchParams();
+    if (state.month) params.set('month', state.month);
+    if (state.prefix) params.set('prefix', state.prefix);
+    if (state.q) params.set('q', state.q);
+    const qs = params.toString();
+    link.href = `/asset_register/export${qs ? `?${qs}` : ''}`;
+}
+
 function loadList(monthOverride) {
     if (typeof monthOverride === 'string') state.month = monthOverride;
+    syncExportLink();
 
     if (state.listController) state.listController.abort();
     state.listController = new AbortController();

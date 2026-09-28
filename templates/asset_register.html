@@ -5,7 +5,7 @@
 {% block page_title %}资产登记{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/asset_register.css?v=19">
+<link rel="stylesheet" href="{{ static_url('css/asset_register.css') }}">
 {% endblock %}
 
 {% block content %}
@@ -52,7 +52,7 @@
                     <span class="field-error" id="assetSpecError" hidden></span>
                 </div>
 
-                <!-- SN 仅租聘台式主机需要（逐台一个），其余类型整组隐藏 -->
+                <!-- SN 仅租赁台式主机需要（逐台一个），其余类型整组隐藏 -->
                 <div class="form-group span-2 sn-group" data-field="sn" hidden>
                     <label for="assetSN">SN 码 <span class="req" aria-hidden="true">*</span></label>
                     <textarea id="assetSN" name="asset_sn" rows="2"
@@ -157,7 +157,7 @@
                 <select id="filterPrefix">
                     <option value="">全部前缀</option>
                     <option value="DZ">DZ（自有）</option>
-                    <option value="ZL">ZL（租聘）</option>
+                    <option value="ZL">ZL（租赁）</option>
                 </select>
             </div>
             <div class="toolbar-field toolbar-search">
@@ -216,5 +216,5 @@
     'page_size': page_size
 } | tojson }}
 </script>
-<script src="/static/js/asset_register.js?v=19"></script>
+<script src="{{ static_url('js/asset_register.js') }}"></script>
 {% endblock %}

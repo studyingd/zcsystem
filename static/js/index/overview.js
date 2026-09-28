@@ -49,7 +49,7 @@ function renderOverviewCards() {
     const statusColors = {
         '已录入': '#28a745',
         '未录入': '#ffc107',
-        '租聘': '#17a2b8',
+        '租赁': '#17a2b8',
         '借用': '#6610f2',
         '入库': '#fd7e14',
         '无需录入': '#6c757d',
