@@ -1,0 +1,40 @@
+# 应用容器编排：MySQL / S3 保持外部依赖。
+#   docker compose -f docker/docker-compose.yml up -d --build   # 构建并启动
+#   docker compose -f docker/docker-compose.yml logs -f web     # 看日志
+# 时区 / 端口 / 并发的默认值内置在 Dockerfile（TZ、PORT、WEB_CONCURRENCY、WEB_THREADS），
+# 需要覆盖时写进 .env 即可（env_file 会注入容器并覆盖镜像默认值）。
+services:
+  web:
+    build:
+      context: ..            # 构建上下文 = 仓库根（镜像要打包 app/ templates/ static/）
+      dockerfile: docker/Dockerfile
+    image: zcsystem:latest
+    env_file: ../.env
+    ports:
+      - "5000:5000"
+    restart: unless-stopped
+
+  # 需要自带 MySQL 时取消注释，并加 --env-file .env（插值读取 .env）：
+  #   docker compose --env-file .env -f docker/docker-compose.yml up -d
+  # 首次启动自动执行 scripts/ 下的建表与种子脚本（按文件名字母序），无需手工导 SQL。
+  # mysql:
+  #   image: mysql:8.4
+  #   command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+  #   environment:
+  #     MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+  #     MYSQL_DATABASE: ${DB_NAME}
+  #     MYSQL_USER: ${DB_USER}
+  #     MYSQL_PASSWORD: ${DB_PASSWORD}
+  #     TZ: Asia/Shanghai
+  #   volumes:
+  #     - mysql-data:/var/lib/mysql
+  #     - ../scripts:/docker-entrypoint-initdb.d:ro
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-p${DB_PASSWORD}"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 10
+
+# volumes:
+#   mysql-data:
