@@ -1,7 +1,16 @@
 /* index/shared.css — 弹窗动效/滚动锁/状态徽章/sr-only 无障碍工具类 */
 /* === 公共弹窗（modal.js）：入场动效 / 滚动锁 / 状态徽章 === */
+/* 滚动锁：overflow:hidden 会隐藏滚动条、视口变宽，导致页面内容重排
+   （表格列换行变化 → 列表高度跳变）。scrollbar-gutter:stable 在锁定
+   期间保留滚动条占位，宽度不变则布局零跳动。浏览器视口滚动条的
+   gutter 以根元素为准，故用 :has() 在 html 上同步声明。 */
 body.modal-lock {
     overflow: hidden;
+    scrollbar-gutter: stable;
+}
+
+html:has(body.modal-lock) {
+    scrollbar-gutter: stable;
 }
 
 .modal-overlay.modal-open,

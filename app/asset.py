@@ -130,14 +130,20 @@ def asset_register():
 @asset_bp.route('/api/asset_register/meta')
 @login_required_api
 def asset_register_meta():
-    """品牌图标地址由后端下发：图标存放在对象存储，前端不再硬编码内网 IP。"""
+    """品牌图标地址由后端下发：图标存放在对象存储，前端不再硬编码内网 IP。
+
+    响应禁缓存：关键字表改动后，页面下次加载即可拿到新表，避免浏览器
+    按启发式缓存旧响应导致“改了关键字但图标不更新”。
+    """
     icon_base = (S3_EXTERNAL_URL or '').rstrip('/')
-    return jsonify({
+    response = jsonify({
         'status': 'success',
         'icon_base': f'{icon_base}/icon/' if icon_base else '',
         'brand_icons': [{'keywords': list(keywords), 'file': filename}
                         for keywords, filename in ledger.BRAND_ICONS],
     })
+    response.headers['Cache-Control'] = 'no-store'
+    return response
 
 
 # ---------- 编码预览 ----------
@@ -298,6 +304,14 @@ def batch_create_assets(conn, cursor):
     return _execute_registration(conn, payload)
 
 
+# 列表排序口径：DZ（自有）前缀优先排完，再排 ZL（租赁）前缀；
+# 组内按编码、id 升序。
+_LIST_ORDER_SQL = (
+    f"CASE WHEN number LIKE '{ledger.CODE_PREFIX_DEFAULT}%' THEN 0 ELSE 1 END, "
+    'number ASC, id ASC'
+)
+
+
 # ---------- 资产列表（搜索 / 筛选 / 分页） ----------
 @asset_bp.route('/api/get_all_assets', methods=['GET'])
 @login_required_api
@@ -306,7 +320,8 @@ def get_all_assets(conn, cursor):
     """台账资产列表。
 
     支持按年月码（month=YYMM）、编码前缀（prefix=DZ|ZL）、关键字（q，覆盖
-    编码 / SN / 规格 / 类型 / 部门 / 使用人）筛选，并分页返回。每行都会用
+    编码 / SN / 规格 / 类型 / 部门 / 使用人）筛选，并分页返回。排序为
+    DZ 前缀在前、ZL 前缀在后，组内按编码升序。每行都会用
     inventory 最新一条流转记录覆盖部门与使用人，并带出资产状态，因此列表
     与详情弹窗、资产变更页看到的是同一份口径。
     """
@@ -324,7 +339,7 @@ def get_all_assets(conn, cursor):
 
     cursor.execute(
         f"SELECT {_DEVICE_COLUMNS} FROM device_list WHERE {where_sql} "
-        f"ORDER BY number DESC, id DESC LIMIT %s OFFSET %s",
+        f"ORDER BY {_LIST_ORDER_SQL} LIMIT %s OFFSET %s",
         (*params, page_size, offset)
     )
     rows = _overlay_latest_inventory(cursor, list(cursor.fetchall()))
@@ -348,11 +363,13 @@ def export_asset_register():
     """导出「资产登记」模块的台账资产（与页面「资产列表」同筛选、同口径，不分页）。
 
     月份 / 编码前缀 / 关键字与列表一致；使用部门、使用人、资产状态按 inventory
-    最新流转覆盖（与列表、详情弹窗同一口径）。错误按纯文本返回（文件下载路由）。
+    最新流转覆盖（与列表、详情弹窗同一口径）。排序与列表一致（DZ 前缀在
+    前、ZL 在后，组内升序），可用 order=desc 反转组内顺序。
+    错误按纯文本返回（文件下载路由）。
     """
-    sort_order = (request.args.get('order') or 'desc').lower()
+    sort_order = (request.args.get('order') or 'asc').lower()
     if sort_order not in ('asc', 'desc'):
-        sort_order = 'desc'
+        sort_order = 'asc'
     conn = _get_db_connection()
     if not conn:
         return '数据库连接失败', 500
@@ -362,7 +379,8 @@ def export_asset_register():
         where_sql, params, _month, _prefix, _keyword = _list_filters(request.args)
         cursor.execute(
             f"SELECT {_DEVICE_COLUMNS} FROM device_list WHERE {where_sql} "
-            f"ORDER BY number {sort_order}, id {sort_order}",
+            f"ORDER BY CASE WHEN number LIKE '{ledger.CODE_PREFIX_DEFAULT}%' THEN 0 ELSE 1 END, "
+            f"number {sort_order}, id {sort_order}",
             tuple(params)
         )
         rows = _overlay_latest_inventory(cursor, list(cursor.fetchall()))

@@ -100,7 +100,11 @@ BRAND_ICONS = (
     (('AOC',), 'AOC.png'),
     (('EDY',), 'EDY.png'),
     (('MAC', 'APPLE'), 'Apple.png'),
-    (('LENOVO',), 'Lenovo.webp'),
+    # 关键字按前端大写后的规格做子串匹配：中文（如“联想”）不受大小写影响，
+    # 英文一律写大写（如 THINKBOOK 可命中 ThinkBook / thinkbook 等）
+    (('LENOVO', '联想', 'THINKBOOK'), 'Lenovo.webp'),
+    (('DELL', '戴尔'), 'DELL.webp'),
+    (('RESERVER',), 'seeed.png'),
 )
 
 DEVICE_FIELDS = 'number, spec, sn, department, name, cpu, mem, disk, gpu'

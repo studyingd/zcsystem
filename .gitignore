@@ -30,3 +30,8 @@ user.txt
 # Test / lint caches
 .pytest_cache/
 .ruff_cache/
+
+# Run logs
+.run-err.log
+.run-out.log
+.run-pid
