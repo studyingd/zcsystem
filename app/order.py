@@ -4,6 +4,8 @@
 金额/预算相关数据仓库原本没有，由 budgets 表按"年度 + 设备类型"配置；
 "今年已采购数量""部门使用情况"为截至单据日期的台账口径，"剩余库存"为当前在库数，
 "申请数量"实时取自飞书多维表当前未发放申请（见 app/feishu.py）。
+预算已用 = 截至单据日期的预算内累计 + budgets.used_adjust 手动修正量，
+与「预算设置」页（自动统计 + 修正量）同口径，两边数字可互相核对。
 """
 
 import logging
@@ -126,6 +128,27 @@ def _budget_totals(cursor, year):
     )
     used = {r['device_type']: _money(r['used']) for r in cursor.fetchall()}
     return totals, used
+
+
+def _budget_adjustments(cursor, years):
+    """各年度预算「手动修正量」（budgets.used_adjust），返回 {year: {device_type: 金额}}。
+
+    预算设置页的已用 = 自动统计 + 手动修正量；单据列表 / 详情的预算徽章若只算
+    自动累计会与预算设置页对不上，因此单据侧在「截至本单累计」之上同样叠加
+    修正量，统一两处口径。返回值只含 used_adjust 非 NULL 的行。
+    """
+    if not years:
+        return {}
+    placeholders = ','.join(['%s'] * len(years))
+    cursor.execute(
+        f"SELECT budget_year, device_type, used_adjust FROM budgets "
+        f"WHERE budget_year IN ({placeholders}) AND used_adjust IS NOT NULL",
+        tuple(int(y) for y in years)
+    )
+    adjusts = {}
+    for r in cursor.fetchall():
+        adjusts.setdefault(int(r['budget_year']), {})[r['device_type']] = _money(r['used_adjust'])
+    return adjusts
 
 
 def _budget_view(device_type, year, totals, used):
@@ -436,12 +459,11 @@ def list_orders(conn, cursor):
     card_counts = _card_counts(cursor, [r['id'] for r in rows])
     # 在库数一次窗口查询批量算齐（旧实现每个 (类型, Mac池) 都全量拉流转历史归并）
     stock_counts = _stock_counts_by_type(cursor, {r['device_type'] for r in rows}, now)
-    # 预算已用改为批量预算前缀和，避免每行单据各查一次 SUM
-    # 预算已用改为批量预算前缀和，避免每行单据各查一次 SUM
-    budget_series = _budget_used_series(
-        cursor,
-        sorted({r['order_date'].year for r in rows if hasattr(r['order_date'], 'year')})
-    )
+    # 预算已用：批量预算前缀和（避免每行单据各查一次 SUM），并叠加 budgets.used_adjust
+    # 手动修正量——与「预算设置」页口径一致，否则两边剩余对不上
+    order_years = sorted({r['order_date'].year for r in rows if hasattr(r['order_date'], 'year')})
+    budget_series = _budget_used_series(cursor, order_years)
+    budget_adjusts = _budget_adjustments(cursor, order_years)
 
     orders = []
     for row in rows:
@@ -449,7 +471,8 @@ def list_orders(conn, cursor):
         dtype = row['device_type']
         order_date = row['order_date']
         yymm = _yymm_of(order_date)
-        # 剩余库存为实时值（批量窗口查询，同类型共用）；预算剩余 / 今年已采购仍为「截至单据日期」的口径
+        # 剩余库存为实时值（批量窗口查询，同类型共用）；今年已采购仍为「截至单据日期」口径；
+        # 预算剩余 = 截至本单累计 + 手动修正量（最新一单与预算设置页数字一致）
         # 台式主机/笔记本：规格含 mac 的 Mac 机与普通机分开计库存，按单据规格判定取哪一池
         mac_pool = is_mac_spec(row.get('spec')) if dtype in MAC_SPLIT_TYPES else None
         if (dtype, yymm) not in purchased_cache:
@@ -463,7 +486,8 @@ def list_orders(conn, cursor):
             'apply_quantity': (apply_totals.get(dtype) if apply_totals is not None else None),
             'purchased_this_year': purchased_cache[(dtype, yymm)],
             'budget': _budget_view(dtype, order_year, totals,
-                                   _budget_used_at(budget_series, dtype, order_year, order_date, row['id'])),
+                                   _budget_used_at(budget_series, dtype, order_year, order_date, row['id'])
+                                   + budget_adjusts.get(order_year, {}).get(dtype, 0.0)),
         }))
 
     summary = {
@@ -533,14 +557,16 @@ def order_detail(conn, cursor, order_id):
 
     # 台式主机/笔记本：规格含 mac 的 Mac 机与普通机分开计库存，按本单规格判定取哪一池
     mac_pool = is_mac_spec(row.get('spec')) if dtype in MAC_SPLIT_TYPES else None
+    # 预算已用 = 截至本单累计 + 手动修正量（与预算设置页同口径）
+    budget_used = _budget_used_at(_budget_used_series(cursor, [order_year]),
+                                   dtype, order_year, row['order_date'], row['id'])
+    budget_used += _budget_adjustments(cursor, [order_year]).get(order_year, {}).get(dtype, 0.0)
     data = _serialize_order(row, {
         'card_count': len(cards),
         'stock_count': _stock_count_until(cursor, dtype, datetime.now(), mac=mac_pool),
         'apply_quantity': (apply_totals.get(dtype) if apply_totals is not None else None),
         'purchased_this_year': _purchased_count_until(cursor, dtype, order_year, _yymm_of(row['order_date'])),
-        'budget': _budget_view(dtype, order_year, totals,
-                               _budget_used_at(_budget_used_series(cursor, [order_year]),
-                                               dtype, order_year, row['order_date'], row['id'])),
+        'budget': _budget_view(dtype, order_year, totals, budget_used),
     })
     return jsonify({'status': 'success', 'order': data, 'cards': cards,
                     'apply_loading': apply_loading})

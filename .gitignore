@@ -35,3 +35,11 @@ user.txt
 .run-err.log
 .run-out.log
 .run-pid
+
+# Office 锁文件（Excel 打开时产生）
+~$*
+
+# 一次性工作日志与含业务数据的导出（不入库）
+scripts/*.log
+scripts/DZ*.xlsx
+scripts/dz2601_*.txt
