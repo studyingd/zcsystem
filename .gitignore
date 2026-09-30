@@ -43,3 +43,4 @@ user.txt
 scripts/*.log
 scripts/DZ*.xlsx
 scripts/dz2601_*.txt
+scripts/archive/
